@@ -1,0 +1,52 @@
+{
+  "name": "@wellmade/payload-ecommerce-tpay",
+  "version": "0.1.0",
+  "description": "Tpay payment adapter for @payloadcms/plugin-ecommerce: BLIK, bank transfers and cards for Polish shops built on Payload CMS 3.",
+  "keywords": [
+    "payload",
+    "payload-plugin",
+    "payloadcms",
+    "ecommerce",
+    "payments",
+    "tpay",
+    "blik",
+    "poland"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README.pl.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node --test test/*.test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@payloadcms/plugin-ecommerce": ">=3.83.0",
+    "payload": ">=3.83.0"
+  },
+  "devDependencies": {
+    "@payloadcms/plugin-ecommerce": "^3.88.0",
+    "payload": "^3.88.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  }
+}
