@@ -90,6 +90,29 @@ Steps 3 and 4 both finish the order, whichever arrives first, and neither create
 
 Both paths are exercised against a real Payload instance with the plugin installed, using a real sandbox notification signed by Tpay, in [`dev/`](dev/README.md). Confirming an already confirmed transaction twice answers `Order already confirmed` and leaves exactly one order, which is measured rather than asserted.
 
+## BLIK in your own checkout (BLIK level 0)
+
+The flow above sends the customer to Tpay to pick a method. BLIK level 0 keeps them where they already are: they type the six digit code from their banking app into your checkout, and nothing redirects anywhere. The adapter registers two endpoints for it.
+
+| Endpoint | Body | Answers |
+| --- | --- | --- |
+| `POST /api/payments/tpay/blik` | `transactionID`, `blikToken`, and `secret` for a guest cart | the code has been sent |
+| `POST /api/payments/tpay/blik-status` | `transactionID`, and `secret` for a guest cart | `pending`, `rejected`, `paid` or `failed` |
+
+A logged in customer who owns the transaction may omit `secret`. Anything else is answered with HTTP 403, and so is an unknown `transactionID`, so the endpoints do not tell an attacker which identifiers exist.
+
+1. Call `initiate` exactly as before. Keep `transactionID`; ignore `paymentUrl`, nobody opens it.
+2. Show a six digit field. The adapter strips spaces and dashes, and rejects anything that is not six digits **before** contacting Tpay, because a BLIK code is single use and lives about two minutes.
+3. `POST /blik` with the code, then poll `/blik-status` every second or two until it stops answering `pending`.
+
+Three things here are measured against a live sandbox rather than assumed, and each of them will bite an integration that guesses instead:
+
+- **Tpay answers `success` to a code that cannot possibly be valid.** The literal code `abcdef` came back as `result: success` with the payment pending. The response to `/blik` therefore means "your request arrived", never "the customer paid". This adapter never reports a payment on the strength of it.
+- **A rejected code does not change the transaction status.** It stays `pending`, and the only trace of the refusal is `paymentErrorCode` on the last entry of `payments.attempts`. Measured with code `000000`, which produced error `63` while the transaction still read `pending`. `/blik-status` reads that entry and answers `rejected`, so your checkout can ask for another code instead of leaving the buyer watching a spinner forever. The payment stays open and the next code goes to the same transaction, with no second order and no second transaction.
+- **These endpoints deliberately bypass the plugin's `confirm-order`.** That handler decrements inventory on every single call, and BLIK level 0 requires polling, so using it here would take a unit of stock per poll. `/blik-status` finishes the order through the same idempotent path the server to server notification uses. The flip side is in Known limitations: a checkout that only ever uses BLIK never triggers the plugin's decrement, so it has to adjust stock itself.
+
+The whole path runs against a real Payload instance with the plugin installed in [`dev/`](dev/README.md), including the refusal: a good code moves the payment to `paid` with one order, a refused code answers `rejected` and leaves the payment open, and a second code sent to that same payment completes it.
+
 ## What the adapter refuses to accept
 
 A notification endpoint is a public URL, so everything about it assumes someone will try to fake a payment.
@@ -128,6 +151,12 @@ decimalStringToMinor('19.99') // 1999
   upstream, a shop should call `confirm-order` at most once per transaction, for example by
   redirecting away from the return URL after the first response, or by recording on the order that
   the return path has already run.
+- **A BLIK checkout adjusts no stock at all unless you do it.** The two limitations above are about
+  `confirm-order` running too often; this one is the opposite. BLIK level 0 never returns the browser
+  anywhere, so a checkout built on `/blik` and `/blik-status` alone never calls `confirm-order` and
+  therefore never reaches the plugin's decrement. Measured on a live instance: a completed BLIK
+  payment created the order and left stock at 5. Adjust inventory yourself once, when `/blik-status`
+  first answers `paid`.
 - **Finishing an order is not an atomic compare and swap.** `payload.update` with a `where` clause is a find followed by a per-document write, so there is a narrow window in which the notification and the browser both believe they finished the order. The result is an orphaned order document, never a double charge, since there is only ever one payment. Closing the window would mean bypassing collection hooks, which is the worse trade.
 - Recurring payments, card tokenisation, marketplace transactions and refunds through the API are not implemented.
 

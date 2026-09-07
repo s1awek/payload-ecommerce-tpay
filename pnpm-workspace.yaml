@@ -1,0 +1,6 @@
+# pnpm 12 nie ostrzega o pominietych skryptach budowania - przerywa instalacje
+# bledem ERR_PNPM_IGNORED_BUILDS. Pole `pnpm` w package.json jest w tej wersji
+# ignorowane, a klucz nazywa sie `allowBuilds` i jest MAPA (nie lista
+# `onlyBuiltDependencies`, ktora podpowiada wiekszosc starszych poradnikow).
+allowBuilds:
+  esbuild: true

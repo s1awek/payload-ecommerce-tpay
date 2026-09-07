@@ -4,6 +4,7 @@ import type { PaymentAdapter, PaymentAdapterClient } from '@payloadcms/plugin-ec
 
 import { TpayClient } from './client.js'
 import { confirmOrder } from './confirmOrder.js'
+import { blikEndpoint, blikStatusEndpoint } from './endpoints/blik.js'
 import { notificationsEndpoint } from './endpoints/notifications.js'
 import { initiatePayment } from './initiatePayment.js'
 import type { TpayAdapterArgs, TpayAdapterClientArgs } from './types.js'
@@ -104,7 +105,10 @@ export const tpayAdapter = (props: TpayAdapterArgs = {}): PaymentAdapter => {
   return {
     name: TPAY_PAYMENT_METHOD,
     confirmOrder: confirmOrder(resolved),
-    endpoints: [notificationsEndpoint(resolved)],
+    // Punkty BLIK-a stoja OBOK punktow wtyczki, a nie zamiast nich, i celowo
+    // nie przechodza przez jej `confirm-order`: ten zdejmuje stan magazynowy
+    // przy kazdym wywolaniu, a BLIK 0 wymaga odpytywania stanu w petli.
+    endpoints: [notificationsEndpoint(resolved), blikEndpoint(resolved), blikStatusEndpoint(resolved)],
     group: groupField,
     initiatePayment: initiatePayment(resolved),
     label,
@@ -127,9 +131,19 @@ export {
   TPAY_SANDBOX_URL,
   type TpayClientOptions,
   type TpayPayer,
+  type TpayPayRequest,
   type TpayTransaction,
   type TpayTransactionRequest,
 } from './client.js'
+export {
+  assertBlikToken,
+  assertTransactionAccess,
+  BLIK_CHANNEL_ID,
+  BLIK_METHOD,
+  BLIK_TOKEN_LENGTH,
+  BlikError,
+  normalizeBlikToken,
+} from './blik.js'
 export { PLN } from './currencies.js'
 export { finalizeOrder, markTransactionStatus, type FinalizeResult } from './finalize.js'
 export type { TpayAdapterArgs, TpayAdapterClientArgs } from './types.js'

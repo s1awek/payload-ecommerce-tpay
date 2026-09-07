@@ -90,6 +90,29 @@ Kroki 3 i 4 domykają zamówienie niezależnie od siebie, w dowolnej kolejności
 
 Obie ścieżki są przejechane na prawdziwej instancji Payloada z wpiętą wtyczką, na prawdziwym powiadomieniu z piaskownicy podpisanym przez Tpay - patrz [`dev/`](dev/README.md). Dwukrotne potwierdzenie już domkniętej transakcji odpowiada `Order already confirmed` i zostawia dokładnie jedno zamówienie, co jest zmierzone, a nie założone.
 
+## BLIK na stronie sklepu (BLIK 0)
+
+Przebieg opisany wyżej wyprowadza kupującego do Tpay, żeby tam wybrał metodę. BLIK 0 zostawia go tam, gdzie jest: sześciocyfrowy kod z aplikacji banku wpisuje w kasie sklepu i nic go nigdzie nie przenosi. Adapter rejestruje do tego dwa punkty.
+
+| Punkt | Ciało | Odpowiada |
+| --- | --- | --- |
+| `POST /api/payments/tpay/blik` | `transactionID`, `blikToken`, a przy koszyku gościa `secret` | kod został wysłany |
+| `POST /api/payments/tpay/blik-status` | `transactionID`, a przy koszyku gościa `secret` | `pending`, `rejected`, `paid` albo `failed` |
+
+Zalogowany właściciel transakcji może pominąć `secret`. Każde inne żądanie dostaje HTTP 403, tak samo jak żądanie o nieznanym `transactionID`, więc punkty nie zdradzają, które identyfikatory istnieją.
+
+1. Wywołaj `initiate` dokładnie tak jak dotąd. Zatrzymaj `transactionID`, a `paymentUrl` zignoruj, nikt go nie otwiera.
+2. Pokaż pole na sześć cyfr. Adapter zdejmuje spacje i myślniki, a kod o innej długości odrzuca **zanim** cokolwiek pójdzie do Tpay, bo kod BLIK jest jednorazowy i żyje około dwóch minut.
+3. Wyślij `POST /blik` z kodem, a potem odpytuj `/blik-status` co sekundę albo dwie, aż przestanie odpowiadać `pending`.
+
+Trzy rzeczy są tu zmierzone na żywej piaskownicy, a nie założone, i każda z nich ugryzie integrację, która zgaduje:
+
+- **Tpay odpowiada `success` na kod, który nie ma prawa być poprawny.** Dosłowny kod `abcdef` wrócił jako `result: success` z płatnością w toku. Odpowiedź na `/blik` znaczy więc „żądanie doszło", nigdy „klient zapłacił". Ten adapter nigdy nie ogłasza na jej podstawie zapłaty.
+- **Odrzucony kod nie zmienia statusu transakcji.** Zostaje `pending`, a jedynym śladem odmowy jest `paymentErrorCode` przy ostatniej pozycji `payments.attempts`. Zmierzone kodem `000000`, który dał błąd `63` przy transakcji nadal opisanej jako `pending`. `/blik-status` czyta tę pozycję i odpowiada `rejected`, dzięki czemu kasa może poprosić o kolejny kod zamiast zostawiać kupującego przy kręcącym się kółku. Płatność zostaje otwarta, a następny kod idzie do tej samej transakcji, bez drugiego zamówienia i bez drugiej transakcji.
+- **Te punkty świadomie omijają `confirm-order` wtyczki.** Tamten handler zdejmuje stan magazynowy przy każdym wywołaniu, a BLIK 0 wymaga odpytywania, więc użycie go tutaj zabierałoby sztukę przy każdym sprawdzeniu. `/blik-status` domyka zamówienie tą samą, idempotentną drogą, którą robi to powiadomienie serwer-serwer. Druga strona tego medalu jest w znanych ograniczeniach: kasa oparta wyłącznie na BLIK-u nigdy nie uruchomi zdejmowania stanu we wtyczce, więc musi zrobić to sama.
+
+Cała ścieżka przechodzi na prawdziwej instancji Payloada z wpiętą wtyczką w [`dev/`](dev/README.md), razem z odmową: dobry kod przestawia płatność na `paid` z jednym zamówieniem, kod odrzucony daje `rejected` i zostawia płatność otwartą, a kolejny kod wysłany do tej samej płatności domyka ją.
+
 ## Czego adapter nie przyjmuje
 
 Punkt odbioru powiadomień to publiczny adres, więc wszystko w nim jest napisane przy założeniu, że ktoś spróbuje podszyć się pod zapłaconą transakcję.
@@ -128,6 +151,12 @@ decimalStringToMinor('19.99') // 1999
   więc kolejną sztukę ze stanu. Dopóki nie zostanie to naprawione w samej wtyczce, sklep powinien
   wołać `confirm-order` najwyżej raz na transakcję: na przykład przekierowując z adresu powrotu po
   pierwszej odpowiedzi albo zapisując na zamówieniu, że ścieżka powrotu już się wykonała.
+- **Kasa na BLIK-u nie rusza stanu magazynowego w ogóle, dopóki sklep nie zrobi tego sam.** Dwa
+  ograniczenia wyżej mówią o `confirm-order` wywoływanym zbyt często, to jest odwrotne. BLIK 0 nigdy
+  nie odsyła przeglądarki nigdzie, więc kasa zbudowana wyłącznie na `/blik` i `/blik-status` nie
+  wywołuje `confirm-order` i nie dociera do zdejmowania stanu we wtyczce. Zmierzone na żywej
+  instancji: domknięta płatność BLIK-iem utworzyła zamówienie i zostawiła stan na 5. Stan trzeba
+  zdjąć samodzielnie, raz, przy pierwszej odpowiedzi `paid` z `/blik-status`.
 - **Domknięcie zamówienia nie jest atomowym compare-and-swap.** `payload.update` z warunkiem `where` to wyszukanie, a dopiero potem zapis po dokumencie, więc zostaje wąskie okno, w którym powiadomienie i przeglądarka uznają się jednocześnie za tego, kto domknął zamówienie. Skutkiem jest osierocony dokument zamówienia, nigdy podwójne obciążenie, bo płatność jest jedna. Domknięcie okna oznaczałoby ominięcie haków kolekcji, co jest gorszym wyborem.
 - Płatności cykliczne, tokenizacja kart, transakcje marketplace i zwroty przez API nie są zaimplementowane.
 

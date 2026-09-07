@@ -139,4 +139,9 @@ export const makeReq = (payload, extra = {}) => ({
   payload,
   user: extra.user,
   ...(extra.body === undefined ? {} : { text: async () => extra.body }),
+  // `data` odwzorowuje zadanie, ktore warstwa wyzej zdazyla juz rozpakowac,
+  // `json` - takie, ktore trzeba przeczytac samemu. Punkty BLIK-a musza radzic
+  // sobie z obiema postaciami, wiec atrapa umie podac kazda z nich osobno.
+  ...(extra.data === undefined ? {} : { data: extra.data }),
+  ...(extra.json === undefined ? {} : { json: async () => extra.json }),
 })

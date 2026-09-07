@@ -62,3 +62,28 @@ passed explicitly in `payload.config.ts`.
 returns the payer wherever the merchant panel points, which is outside your shop, so
 `confirm-order` is never called. That endpoint is where the plugin decrements stock, so a shop
 missing these two settings takes payments and never adjusts inventory.
+
+## The BLIK level 0 run
+
+`blik-przebieg.mts` seeds a product and a guest cart, calls `initiate`, sends a six digit code to
+`/payments/tpay/blik` and then polls `/payments/tpay/blik-status` until the payment stops being
+pending. It prints the database state afterwards. `BLIK_TOKEN` picks the code, which is how the
+same script measures both directions:
+
+```bash
+BLIK_TOKEN=777123 tsx blik-przebieg.mts   # accepted: pending, then paid, one order
+BLIK_TOKEN=000000 tsx blik-przebieg.mts   # refused: rejected, error 63, payment left open
+```
+
+`blik-drugi-kod.mts` takes `TX_ID` of a payment that was refused and sends a good code to that same
+payment, which is the case a checkout has to survive. It counts documents before and after, because
+"the buyer retried" must not mean "a second transaction and a second order appeared".
+
+No tunnel is needed for any of this. The BLIK path reads the payment state by asking Tpay, so it
+does not wait for the server to server notification, and the run measures the BLIK path alone.
+`NEXT_PUBLIC_SERVER_URL` still has to be set to something absolute, because the adapter refuses to
+create a payment without a notification address, but that address is never reached during this run.
+
+Two things worth repeating from the package README, because both were found here and neither is
+visible from unit tests: Tpay answers `success` to a code that is not valid, and a refused code
+leaves the transaction reading `pending` with the refusal recorded only in `payments.attempts`.

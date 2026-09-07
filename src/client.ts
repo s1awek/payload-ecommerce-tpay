@@ -51,6 +51,21 @@ export type TpayTransactionRequest = {
   payer: TpayPayer
 }
 
+/**
+ * Cialo zadania `POST /transactions/{id}/pay`. Uwaga: tu pola leza PLASKO,
+ * a przy tworzeniu transakcji te same pola siedza pod kluczem `pay`.
+ * Zrodlo: tpay-com/tpay-woocommerce, includes/TpayBlik.php.
+ */
+export type TpayPayRequest = {
+  blikPaymentData?: {
+    aliases?: { label?: string; type: string; value: string }
+    blikToken?: string
+    type?: number
+  }
+  channelId?: number
+  method?: string
+}
+
 export type TpayTransaction = {
   [key: string]: unknown
   amount?: number
@@ -132,6 +147,32 @@ export class TpayClient {
 
   public async createTransaction(payload: TpayTransactionRequest): Promise<TpayTransaction> {
     return await this.request<TpayTransaction>('POST', '/transactions', payload)
+  }
+
+  /**
+   * Dosyla dane platnosci do istniejacej transakcji. Tak dziala BLIK 0:
+   * transakcja powstaje bez metody, a kod z kasy sklepu idzie osobnym zadaniem,
+   * dzieki czemu odrzucony albo przeterminowany kod da sie powtorzyc bez
+   * zakladania nowej transakcji.
+   *
+   * UWAGA: `result: success` w odpowiedzi znaczy tylko tyle, ze Tpay przyjal
+   * zadanie. NIE znaczy, ze kod jest poprawny - zmierzone 07.09.2026 na
+   * piaskownicy, gdzie kod `abcdef` przeszedl jako `success`/`pending`.
+   * Rozstrzygniecie przychodzi pozniej, statusem transakcji i powiadomieniem.
+   */
+  public async payByTransactionId(
+    transactionId: string,
+    fields: TpayPayRequest,
+  ): Promise<TpayTransaction> {
+    if (!transactionId) {
+      throw new Error('A transaction ID is required.')
+    }
+
+    return await this.request<TpayTransaction>(
+      'POST',
+      `/transactions/${encodeURIComponent(transactionId)}/pay`,
+      fields,
+    )
   }
 
   public async getTransaction(transactionId: string): Promise<TpayTransaction> {
