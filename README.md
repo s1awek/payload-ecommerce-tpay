@@ -125,6 +125,15 @@ npm test     # builds, then runs the suite
 
 The suite runs offline against fixtures and a Payload stub: no Tpay account is needed. Certificates for the signature tests are generated at test time with `openssl`, so no private key is checked in.
 
+## Who built this
+
+Built by [Wellmade](https://wellmade.online/en), a one person studio working on Payload, headless
+commerce and WordPress. The adapter came out of running a real Payload shop in production and needing
+Polish payment methods that Stripe does not cover.
+
+If this adapter is close to what your shop needs but not quite there, the gaps are listed under
+Limitations above. Extensions, other Polish providers and paid work on this package are all possible.
+
 ## License
 
 MIT

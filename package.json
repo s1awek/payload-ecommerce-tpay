@@ -12,6 +12,11 @@
     "blik",
     "poland"
   ],
+  "homepage": "https://wellmade.online/en",
+  "author": {
+    "name": "Wellmade",
+    "url": "https://wellmade.online/en"
+  },
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

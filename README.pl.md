@@ -125,6 +125,16 @@ npm test     # najpierw budowanie, potem suita
 
 Suita chodzi offline, na atrapach i danych testowych: konto Tpay nie jest do niej potrzebne. Certyfikaty do testów podpisu powstają w trakcie testu przez `openssl`, więc żaden klucz prywatny nie leży w repozytorium.
 
+## Kto to napisał
+
+Adapter napisało [Wellmade](https://wellmade.online), jednoosobowe studio pracujące na Payloadzie,
+headless commerce i WordPressie. Powstał z potrzeby: sklep na Payloadzie stoi na produkcji, a Stripe
+nie daje metod płatności, z których realnie korzystają polscy kupujący.
+
+Jeśli adapter jest blisko tego, czego potrzebuje Twój sklep, ale nie do końca, to braki są wypisane
+wyżej w sekcji o ograniczeniach. Rozszerzenia, inni polscy dostawcy i praca zlecona nad tym pakietem
+są możliwe.
+
 ## Licencja
 
 MIT
