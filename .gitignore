@@ -5,3 +5,8 @@ dist/
 .env.*
 !.env.example
 .workspace/
+
+# Przechwyty z przebiegow e2e: niosa prawdziwy md5sum, czyli md5(znany prefiks + kod
+# bezpieczenstwa). W repozytorium, ktore ma byc opublikowane, to material do lamania
+# kodu offline. Zostaja lokalnie; do testow sluzy przygotowana atrapa.
+test/e2e/captures/

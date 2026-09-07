@@ -47,7 +47,7 @@ const request = {
   description: `Order ${localTransactionId}`,
   hiddenDescription: localTransactionId,
   lang: 'pl',
-  payer: { email: 'hello@wellmade.online', name: 'Jan Testowy' },
+  payer: { email: 'kupujacy@example.invalid', name: 'Jan Testowy' },
 }
 
 console.log('--- zadanie ---')
