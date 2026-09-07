@@ -84,9 +84,11 @@ Pełny publiczny adres tego punktu ustaw jako adres powiadomień: albo per trans
 1. Front sklepu woła `POST /api/payments/tpay/initiate`. Adapter zapisuje transakcję w stanie `pending`, tworzy odpowiadającą jej transakcję w Tpay i zwraca `paymentUrl`.
 2. Front przekierowuje klienta na `paymentUrl`.
 3. Tpay pobiera płatność i wysyła powiadomienie serwer-serwer na punkt powyżej. Adapter je weryfikuje i tworzy zamówienie.
-4. Klient wraca na `payerSuccessUrl`, a front woła `POST /api/payments/tpay/confirm-order` z `transactionID` zwróconym w kroku 1.
+4. Klient wraca na `payerSuccessUrl`, a front woła `POST /api/payments/tpay/confirm-order` z `transactionID` zwróconym w kroku 1 **oraz z `cartID`** (a przy koszyku gościa dodatkowo z jego `secret`). Sam adapter potrzebuje wyłącznie transakcji, ale handler wtyczki odrzuca żądanie komunikatem `Cart ID is required.`, zanim w ogóle dojdzie do adaptera, więc trzeba wysłać oba.
 
 Kroki 3 i 4 domykają zamówienie niezależnie od siebie, w dowolnej kolejności, i żaden nie tworzy drugiego. To nie jest szczegół: przy płatności z przekierowaniem nie ma gwarancji, że przeglądarka w ogóle wróci. Klient potrafi zapłacić BLIKiem i zamknąć kartę.
+
+Obie ścieżki są przejechane na prawdziwej instancji Payloada z wpiętą wtyczką, na prawdziwym powiadomieniu z piaskownicy podpisanym przez Tpay - patrz [`dev/`](dev/README.md). Dwukrotne potwierdzenie już domkniętej transakcji odpowiada `Order already confirmed` i zostawia dokładnie jedno zamówienie, co jest zmierzone, a nie założone.
 
 ## Czego adapter nie przyjmuje
 
@@ -112,7 +114,20 @@ decimalStringToMinor('19.99') // 1999
 
 ## Znane ograniczenia
 
-- **Stan magazynowy zdejmuje punkt `confirm-order` z wtyczki, nie adapter.** Jeśli zamówienie domknie powiadomienie, a klient nigdy nie wróci do sklepu, stan magazynowy nie zostanie dla niego skorygowany. Adapter świadomie też go nie rusza, bo wtedy ścieżka przeglądarki zdjęłaby towar drugi raz. Na dziś domknięcie tego przypadku jest po stronie sklepu.
+- **Stan magazynowy zdejmuje punkt `confirm-order` z wtyczki, nie adapter.** Jeśli zamówienie domknie
+  powiadomienie, a klient nigdy nie wróci do sklepu, stan magazynowy nie zostanie dla niego
+  skorygowany. Adapter świadomie też go nie rusza, bo wtedy ścieżka przeglądarki zdjęłaby towar
+  drugi raz. Na dziś domknięcie tego przypadku jest po stronie sklepu.
+
+- **To zdejmowanie nie ma zabezpieczenia przed powtórzeniem, więc stronę powrotu trzeba osłonić
+  samemu.** Zmierzone na żywej instancji z plugin-ecommerce 3.88.0: dwa identyczne wywołania
+  `confirm-order` dla jednej, już domkniętej transakcji zdjęły stan z 5 na 4, a potem na 3. Adapter
+  w obu wywołaniach zachowuje się poprawnie, odpowiada `Order already confirmed` i nie tworzy
+  drugiego zamówienia; handler wtyczki i tak zdejmuje towar raz na każde wywołanie, bo działa na
+  zwróconym `transactionID`. Klient, który odświeży stronę powrotu z kasy, za każdym razem zabiera
+  więc kolejną sztukę ze stanu. Dopóki nie zostanie to naprawione w samej wtyczce, sklep powinien
+  wołać `confirm-order` najwyżej raz na transakcję: na przykład przekierowując z adresu powrotu po
+  pierwszej odpowiedzi albo zapisując na zamówieniu, że ścieżka powrotu już się wykonała.
 - **Domknięcie zamówienia nie jest atomowym compare-and-swap.** `payload.update` z warunkiem `where` to wyszukanie, a dopiero potem zapis po dokumencie, więc zostaje wąskie okno, w którym powiadomienie i przeglądarka uznają się jednocześnie za tego, kto domknął zamówienie. Skutkiem jest osierocony dokument zamówienia, nigdy podwójne obciążenie, bo płatność jest jedna. Domknięcie okna oznaczałoby ominięcie haków kolekcji, co jest gorszym wyborem.
 - Płatności cykliczne, tokenizacja kart, transakcje marketplace i zwroty przez API nie są zaimplementowane.
 

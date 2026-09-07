@@ -10,3 +10,16 @@ dist/
 # bezpieczenstwa). W repozytorium, ktore ma byc opublikowane, to material do lamania
 # kodu offline. Zostaja lokalnie; do testow sluzy przygotowana atrapa.
 test/e2e/captures/
+
+# Gospodarz deweloperski: baza, logi i uchwyty procesow sa artefaktami przebiegu,
+# nie zrodlem. Adres tunelu zmienia sie przy kazdym uruchomieniu, wiec zapisany
+# w repozytorium byloby smieciem wskazujacym na cudzy host.
+dev/*.db
+dev/*.db-journal
+dev/*.db-shm
+dev/*.db-wal
+dev/*.log
+dev/*.pid
+dev/*.url
+dev/payload-types.ts
+dev/media/

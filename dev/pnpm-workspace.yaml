@@ -1,0 +1,27 @@
+# Zezwolenia na skrypty budujace przy instalacji.
+#
+# Dwie pulapki pnpm 12, obie zaliczone 07.09.2026:
+#  1. Zablokowany skrypt budujacy PRZERYWA instalacje (ERR_PNPM_IGNORED_BUILDS),
+#     nie jest ostrzezeniem. Kod wyjscia 1, nic nie zainstalowane.
+#  2. Pole "pnpm" w package.json NIE JEST czytane (pnpm mowi to w ostrzezeniu),
+#     a klucz nazywa sie `allowBuilds` i jest MAPA - nie `onlyBuiltDependencies`
+#     z lista, jak w wersjach wczesniejszych. Zapis z bledna nazwa klucza
+#     przechodzi bez slowa skargi i nie dziala.
+#
+# Ten plik zostal wygenerowany przez `pnpm approve-builds esbuild`, i to jest
+# pewniejsza droga niz pisanie go z pamieci. esbuild pobiera w postinstall
+# binarium dla platformy i bez tego nie dziala.
+#
+# Nie wpisywac paczek, ktorych w drzewie nie ma: `approve-builds` przerywa wtedy
+# bledem ERR_PNPM_APPROVE_BUILDS_UNKNOWN_PACKAGES i nie robi nic.
+allowBuilds:
+  esbuild: true
+# pnpm 12 nie czyta pola "pnpm" z package.json i mowi to wprost w ostrzezeniu.
+# Konfiguracja zezwolen na skrypty budujace idzie tutaj.
+#
+# Dlaczego jawna lista, a nie wylaczenie kontroli: esbuild pobiera w postinstall
+# binarium dla platformy i bez tego nie dziala. Reszta paczek nie ma powodu
+# uruchamiac niczego przy instalacji.
+#
+# UWAGA: nie wpisywac tu paczek, ktorych w drzewie nie ma - `pnpm approve-builds`
+# przerywa wtedy calym bledem ERR_PNPM_APPROVE_BUILDS_UNKNOWN_PACKAGES.

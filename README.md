@@ -84,9 +84,11 @@ Set that full public URL as the notification address, either per transaction (th
 1. The storefront calls `POST /api/payments/tpay/initiate`. The adapter writes a `pending` transaction, creates the matching transaction in Tpay and returns `paymentUrl`.
 2. The storefront redirects the customer to `paymentUrl`.
 3. Tpay charges the customer and sends a server to server notification to the endpoint above. The adapter verifies it and creates the order.
-4. The customer comes back to `payerSuccessUrl`, and the storefront calls `POST /api/payments/tpay/confirm-order` with the `transactionID` returned in step 1.
+4. The customer comes back to `payerSuccessUrl`, and the storefront calls `POST /api/payments/tpay/confirm-order` with the `transactionID` returned in step 1 **and the `cartID`** (plus the cart `secret` for a guest cart). The adapter itself only needs the transaction, but the plugin's handler rejects the request with `Cart ID is required.` before the adapter is ever reached, so send both.
 
 Steps 3 and 4 both finish the order, whichever arrives first, and neither creates a second one. That matters because a redirect payment has no guarantee the browser ever comes back: the customer can pay with BLIK and close the tab.
+
+Both paths are exercised against a real Payload instance with the plugin installed, using a real sandbox notification signed by Tpay, in [`dev/`](dev/README.md). Confirming an already confirmed transaction twice answers `Order already confirmed` and leaves exactly one order, which is measured rather than asserted.
 
 ## What the adapter refuses to accept
 
@@ -112,7 +114,20 @@ decimalStringToMinor('19.99') // 1999
 
 ## Known limitations
 
-- **Inventory is decremented by the plugin's `confirm-order` endpoint, not by the adapter.** If the notification finishes an order and the customer never returns to the shop, stock is not adjusted for that order. The adapter deliberately does not adjust it either, because the browser path would then decrement a second time. Reconciling that case is on the shop for now.
+- **Inventory is decremented by the plugin's `confirm-order` endpoint, not by the adapter.** If the
+  notification finishes an order and the customer never returns to the shop, stock is not adjusted for
+  that order. The adapter deliberately does not adjust it either, because the browser path would then
+  decrement a second time. Reconciling that case is on the shop for now.
+
+- **That decrement has no idempotency gate, so guard the return page yourself.** Measured against
+  plugin-ecommerce 3.88.0 on a live instance: two identical `confirm-order` calls for one already
+  confirmed transaction took stock from 5 to 4 to 3. The adapter behaves correctly in both calls,
+  answering `Order already confirmed` and creating no second order; the plugin's handler decrements
+  once per call regardless, because it acts on the returned `transactionID`. A customer who reloads
+  the checkout return page therefore removes another unit of stock each time. Until this is fixed
+  upstream, a shop should call `confirm-order` at most once per transaction, for example by
+  redirecting away from the return URL after the first response, or by recording on the order that
+  the return path has already run.
 - **Finishing an order is not an atomic compare and swap.** `payload.update` with a `where` clause is a find followed by a per-document write, so there is a narrow window in which the notification and the browser both believe they finished the order. The result is an orphaned order document, never a double charge, since there is only ever one payment. Closing the window would mean bypassing collection hooks, which is the worse trade.
 - Recurring payments, card tokenisation, marketplace transactions and refunds through the API are not implemented.
 
