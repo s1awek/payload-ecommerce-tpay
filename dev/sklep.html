@@ -119,10 +119,10 @@
         <h2 id="p-tytul">Płatność</h2>
         <div id="p-status"></div>
         <div id="p-ponow" hidden>
-          <label>Nowy kod BLIK do tej samej płatności</label>
+          <label>Wpisz kod BLIK jeszcze raz</label>
           <input id="blik2" class="blik" inputmode="numeric" maxlength="7" placeholder="000 000" autocomplete="off">
           <div class="wiersz" style="margin-top:10px">
-            <button class="przycisk" id="btn-blik2" onclick="ponowBlik()">Wyślij nowy kod</button>
+            <button class="przycisk" id="btn-blik2" onclick="ponowBlik()">Zapłać BLIK-iem</button>
             <span class="maly">Koszyk i transakcja zostają te same, nie powstaje drugie zamówienie.</span>
           </div>
         </div>
@@ -298,7 +298,8 @@ async function obsluzPowrot(sciezka) {
   }
   ustawStatus('czekam', 'Sprawdzam stan płatności w Tpay<span class="kropki"></span>');
   sessionStorage.setItem(klucz, '1');
-  const r = await post(`${API}/confirm-order`, { customerEmail: $('f-email').value.trim() || 'kupujacy@example.invalid', transactionID: platnosc.transactionID });
+  // Wtyczka wymaga koszyka i jego sekretu (gość), adapter bierze transactionID; bez cartID odpowiada 400 „Cart ID is required”.
+  const r = await post(`${API}/confirm-order`, { cartID: platnosc.cartID, secret: platnosc.secret, customerEmail: $('f-email').value.trim() || 'kupujacy@example.invalid', transactionID: platnosc.transactionID });
   if (r.status === 200) ustawStatus('ok', `<b>Zapłacono.</b> ${r.body?.message || ''} Zamówienie nr ${r.body?.orderID ?? '(patrz baza)'}.`);
   else ustawStatus('blad', `confirm-order odpowiedział ${r.status}: ${r.body?.message || ''}`);
   zakoncz();
