@@ -1,8 +1,8 @@
 /**
- * Atrapa `payload` na potrzeby testow: kolekcje w pamieci, z prawdziwa semantyka
- * warunkowej aktualizacji (`update` z `where`). To ta semantyka rozstrzyga wyscig
- * miedzy powiadomieniem a powrotem przegladarki, wiec atrapa, ktora zawsze
- * przepuszcza aktualizacje, nie zmierzylaby niczego.
+ * `payload` stub for tests: in-memory collections, with real semantics for the
+ * conditional update (`update` with `where`). This semantics is what resolves
+ * the race between a notification and the browser return, so a stub that always
+ * lets the update through would not measure anything.
  */
 
 const getPath = (doc, path) =>
@@ -139,9 +139,9 @@ export const makeReq = (payload, extra = {}) => ({
   payload,
   user: extra.user,
   ...(extra.body === undefined ? {} : { text: async () => extra.body }),
-  // `data` odwzorowuje zadanie, ktore warstwa wyzej zdazyla juz rozpakowac,
-  // `json` - takie, ktore trzeba przeczytac samemu. Punkty BLIK-a musza radzic
-  // sobie z obiema postaciami, wiec atrapa umie podac kazda z nich osobno.
+  // `data` mirrors a request that the layer above has already unpacked,
+  // `json` - one that still needs to be read manually. The BLIK endpoints must
+  // handle both shapes, so the stub can supply each of them separately.
   ...(extra.data === undefined ? {} : { data: extra.data }),
   ...(extra.json === undefined ? {} : { json: async () => extra.json }),
 })

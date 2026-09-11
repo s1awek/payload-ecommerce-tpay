@@ -3,16 +3,17 @@ import { createHash, timingSafeEqual, X509Certificate, createVerify } from 'node
 import { normalizeAmountString } from './amount.js'
 
 /**
- * Weryfikacja autentycznosci powiadomienia Tpay.
+ * Verification of the authenticity of a Tpay notification.
  *
- * Powiadomienie przychodzi jako POST z formularzem (application/x-www-form-urlencoded)
- * na adres podany przy tworzeniu transakcji. Kazdy moze pod ten adres strzelic,
- * wiec bez weryfikacji zamowienie da sie oplacic slowem honoru.
+ * The notification arrives as a form POST (application/x-www-form-urlencoded)
+ * to the URL given when the transaction was created. Anyone can fire at that
+ * URL, so without verification an order could be paid for on one's word of
+ * honour.
  *
- * Sa dwie niezalezne warstwy:
- *  1. Suma md5 z kodu bezpieczenstwa - obowiazkowa, liczona lokalnie.
- *  2. Podpis JWS w naglowku X-JWS-Signature - opcjonalna, wymaga pobrania
- *     certyfikatu Tpay. Wlaczana `verifyJws: true`.
+ * There are two independent layers:
+ *  1. The md5 checksum over the security code - mandatory, computed locally.
+ *  2. The JWS signature in the X-JWS-Signature header - optional, requires
+ *     fetching the Tpay certificate. Turned on with `verifyJws: true`.
  */
 
 export type TpayNotification = {
@@ -32,9 +33,9 @@ export type TpayNotification = {
 }
 
 /**
- * Suma kontrolna wg dokumentacji Tpay: md5(merchantId + tr_id + kwota + tr_crc + kod).
- * Kwota musi byc sformatowana do dwoch miejsc po kropce - identycznie jak robi to
- * oficjalne SDK (`number_format($amount, 2, '.', '')`).
+ * Checksum as per the Tpay documentation: md5(merchantId + tr_id + amount + tr_crc + code).
+ * The amount must be formatted to two decimal places - exactly as the official
+ * SDK does it (`number_format($amount, 2, '.', '')`).
  */
 export function notificationChecksum(
   notification: TpayNotification,
@@ -54,8 +55,9 @@ export function notificationChecksum(
 }
 
 /**
- * Porownanie sum kontrolnych w czasie stalym. Zwykle `===` na napisach konczy sie
- * na pierwszym roznym znaku, co przy zdalnym probowaniu wycieka polozenie roznicy.
+ * Constant-time comparison of checksums. A plain `===` on strings stops at the
+ * first differing character, which under remote probing leaks the position of
+ * the difference.
  */
 export function isChecksumValid(
   notification: TpayNotification,
@@ -71,7 +73,7 @@ export function isChecksumValid(
   return timingSafeEqual(Buffer.from(expected, 'utf8'), Buffer.from(received, 'utf8'))
 }
 
-/** Parsuje cialo powiadomienia (application/x-www-form-urlencoded) na obiekt. */
+/** Parses a notification body (application/x-www-form-urlencoded) into an object. */
 export function parseNotificationBody(body: string): TpayNotification {
   const params = new URLSearchParams(body)
   const out: TpayNotification = {}
@@ -84,12 +86,14 @@ export function parseNotificationBody(body: string): TpayNotification {
 }
 
 /**
- * Hosty, z ktorych wolno pobrac certyfikat wskazany w naglowku `x5u` podpisu.
+ * Hosts the certificate named in the signature's `x5u` header may be fetched
+ * from.
  *
- * To nie jest ozdoba: `x5u` przychodzi od strony, ktora wlasnie weryfikujemy.
- * Bez tej listy napastnik podaje adres wlasnego certyfikatu, podpisuje nim
- * dowolne powiadomienie i przechodzi weryfikacje, a serwer przy okazji wykonuje
- * zadanie HTTP pod adres wskazany przez napastnika.
+ * This is not decoration: `x5u` comes from the very party we are verifying.
+ * Without this list an attacker supplies the URL of their own certificate,
+ * signs an arbitrary notification with it and passes verification, while the
+ * server makes an HTTP request to a URL of the attacker's choosing along the
+ * way.
  */
 export const TPAY_JWS_PRODUCTION_HOST = 'secure.tpay.com'
 export const TPAY_JWS_SANDBOX_HOST = 'secure.sandbox.tpay.com'
@@ -97,26 +101,26 @@ export const TPAY_JWS_SANDBOX_HOST = 'secure.sandbox.tpay.com'
 export const DEFAULT_ALLOWED_X5U_HOSTS = [TPAY_JWS_PRODUCTION_HOST] as const
 
 /**
- * Certyfikat podpisujacy sandboksu jest wystawiany pod innym hostem niz produkcyjny,
- * a lista jest rozlaczna celowo: powiadomienie podpisane certyfikatem sandboksu
- * nie ma prawa przejsc na produkcji.
+ * The sandbox signing certificate is issued under a different host than the
+ * production one, and the lists are disjoint on purpose: a notification signed
+ * with the sandbox certificate must not pass in production.
  */
 export function allowedX5uHostsFor(sandbox: boolean): readonly string[] {
   return sandbox ? [TPAY_JWS_SANDBOX_HOST] : [TPAY_JWS_PRODUCTION_HOST]
 }
 
-/** Adres certyfikatu glownego Tpay, do sprawdzenia lancucha podpisu. */
+/** URL of the Tpay root certificate, used to check the signature chain. */
 export function jwsRootCertificateUrl(sandbox: boolean): string {
   return `https://${sandbox ? TPAY_JWS_SANDBOX_HOST : TPAY_JWS_PRODUCTION_HOST}/x509/tpay-jws-root.pem`
 }
 
 type JwsVerifyArgs = {
   allowedX5uHosts?: readonly string[]
-  /** Zrodlo certyfikatow, wstrzykiwalne w testach. */
+  /** Certificate source, injectable in tests. */
   fetchCertificate?: (url: string) => Promise<string>
   header: string
   rawBody: string
-  /** Certyfikat glowny (PEM) do sprawdzenia lancucha. Bez niego lancuch nie jest sprawdzany. */
+  /** Root certificate (PEM) used to check the chain. Without it the chain is not checked. */
   rootCertificate?: string
 }
 
@@ -152,10 +156,12 @@ function base64UrlDecode(value: string): Buffer {
 }
 
 /**
- * Weryfikuje odlaczony podpis JWS (naglowek `X-JWS-Signature`) nad surowym cialem zadania.
+ * Verifies a detached JWS signature (the `X-JWS-Signature` header) over the raw
+ * request body.
  *
- * Naglowek ma postac `<protected>..<signature>` - czesc srodkowa jest pusta,
- * bo ladunkiem jest samo cialo zadania, ktore nie jest powtarzane w podpisie.
+ * The header has the form `<protected>..<signature>` - the middle part is empty,
+ * because the payload is the request body itself, which is not repeated in the
+ * signature.
  */
 export async function verifyJwsSignature(args: JwsVerifyArgs): Promise<JwsVerifyResult> {
   const {

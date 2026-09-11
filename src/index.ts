@@ -15,12 +15,12 @@ const firstDefined = (...values: (string | undefined)[]): string | undefined =>
   values.find((value) => typeof value === 'string' && value.length > 0)
 
 /**
- * Adapter platnosci Tpay dla @payloadcms/plugin-ecommerce.
+ * Tpay payment adapter for @payloadcms/plugin-ecommerce.
  *
- * Tpay jest metoda z przekierowaniem: sklep tworzy transakcje, odsyla platnika
- * na strone Tpay, a wynik przychodzi dwiema niezaleznymi droga - powiadomieniem
- * serwer-serwer i powrotem przegladarki. Obie sciezki domykaja zamowienie przez
- * ten sam, odporny na wyscig kod (`finalizeOrder`).
+ * Tpay is a redirect method: the shop creates a transaction, sends the payer to
+ * the Tpay page, and the result comes back by two independent routes - a
+ * server-to-server notification and the return of the browser. Both paths close
+ * the order through the same race-resistant code (`finalizeOrder`).
  */
 export const tpayAdapter = (props: TpayAdapterArgs = {}): PaymentAdapter => {
   const label = props.label || 'Tpay'
@@ -105,9 +105,10 @@ export const tpayAdapter = (props: TpayAdapterArgs = {}): PaymentAdapter => {
   return {
     name: TPAY_PAYMENT_METHOD,
     confirmOrder: confirmOrder(resolved),
-    // Punkty BLIK-a stoja OBOK punktow wtyczki, a nie zamiast nich, i celowo
-    // nie przechodza przez jej `confirm-order`: ten zdejmuje stan magazynowy
-    // przy kazdym wywolaniu, a BLIK 0 wymaga odpytywania stanu w petli.
+    // The BLIK endpoints stand ALONGSIDE the plugin's endpoints, not instead
+    // of them, and deliberately do not go through its `confirm-order`: that one
+    // decrements stock on every call, while BLIK 0 requires polling the state
+    // in a loop.
     endpoints: [notificationsEndpoint(resolved), blikEndpoint(resolved), blikStatusEndpoint(resolved)],
     group: groupField,
     initiatePayment: initiatePayment(resolved),
@@ -115,12 +116,12 @@ export const tpayAdapter = (props: TpayAdapterArgs = {}): PaymentAdapter => {
   }
 }
 
-/** Odpowiednik adaptera po stronie przegladarki. */
+/** Browser-side counterpart of the adapter. */
 export const tpayAdapterClient = (props: TpayAdapterClientArgs = {}): PaymentAdapterClient => ({
   name: TPAY_PAYMENT_METHOD,
   confirmOrder: true,
   initiatePayment: true,
-  label: props.label || 'BLIK, przelew, karta (Tpay)',
+  label: props.label || 'BLIK, bank transfer, card (Tpay)',
 })
 
 export {

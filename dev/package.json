@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Minimalny gospodarz: prawdziwa instancja Payloada z wtyczka e-commerce i naszym adapterem. Sluzy do przebiegow, ktorych nie da sie zmierzyc na atrapie.",
+  "description": "Minimal host: a real Payload instance with the e-commerce plugin and our adapter. Used for runs that cannot be measured against a stub.",
   "dependencies": {
     "@payloadcms/db-sqlite": "^3.88.0",
     "@payloadcms/plugin-ecommerce": "^3.88.0",

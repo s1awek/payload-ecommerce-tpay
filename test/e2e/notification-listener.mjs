@@ -1,9 +1,9 @@
 /**
- * Nasluch przechwytujacy PRAWDZIWE powiadomienie od Tpay.
+ * Listener that captures a REAL notification from Tpay.
  *
- * Zapisuje surowe cialo i naglowki do `test/e2e/captures/`, zeby dalo sie je pozniej
- * odtworzyc offline i sprawdzic nasza weryfikacje sumy kontrolnej oraz podpisu JWS.
- * Odpowiada `TRUE`, bo tego oczekuje Tpay - inaczej ponawia powiadomienie.
+ * Saves the raw body and headers to `test/e2e/captures/`, so they can later be
+ * replayed offline and used to check our checksum verification and JWS signature.
+ * Responds `TRUE`, because that is what Tpay expects - otherwise it retries the notification.
  */
 import { createServer } from 'node:http'
 import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
@@ -29,7 +29,7 @@ createServer((req, res) => {
   req.on('data', (c) => chunks.push(c))
   req.on('end', () => {
     if (req.method !== 'POST') {
-      log(`heartbeat ${req.method} ${req.url} (${Math.round((Date.now() - started) / 1000)} s pracy, przechwycono ${n})`)
+      log(`heartbeat ${req.method} ${req.url} (${Math.round((Date.now() - started) / 1000)} s uptime, captured ${n})`)
       res.writeHead(200, { 'content-type': 'text/plain' })
       return res.end('listener alive')
     }
@@ -41,8 +41,8 @@ createServer((req, res) => {
       join(outDir, `notification-${stamp}.headers.json`),
       JSON.stringify(req.headers, null, 2),
     )
-    log(`PRZECHWYCONO #${n}: ${body.length} bajtow, naglowkow ${Object.keys(req.headers).length}, plik notification-${stamp}`)
+    log(`CAPTURED #${n}: ${body.length} bytes, ${Object.keys(req.headers).length} headers, file notification-${stamp}`)
     res.writeHead(200, { 'content-type': 'text/plain' })
     res.end('TRUE')
   })
-}).listen(8099, '127.0.0.1', () => log('nasluch na 127.0.0.1:8099, zapis do test/e2e/captures/'))
+}).listen(8099, '127.0.0.1', () => log('listening on 127.0.0.1:8099, writing to test/e2e/captures/'))

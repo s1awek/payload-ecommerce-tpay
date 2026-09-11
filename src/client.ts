@@ -1,22 +1,22 @@
 /**
- * Klient Tpay Open API.
+ * Tpay Open API client.
  *
- * Uwierzytelnienie: OAuth client credentials. Token zyje 7200 s, wiec trzymamy go
- * w pamieci procesu i odswiezamy z zapasem. Bez tego kazde utworzenie transakcji
- * to dwa zadania zamiast jednego.
+ * Authentication: OAuth client credentials. The token lives for 7200 s, so we
+ * keep it in process memory and refresh it with a margin. Without that, every
+ * transaction creation would be two requests instead of one.
  */
 
 export const TPAY_PRODUCTION_URL = 'https://api.tpay.com'
 export const TPAY_SANDBOX_URL = 'https://openapi.sandbox.tpay.com'
 
 export type TpayClientOptions = {
-  /** Nadpisuje adres API. Podanie tego pola wygrywa z `sandbox`. */
+  /** Overrides the API URL. Setting this field wins over `sandbox`. */
   baseUrl?: string
   clientId: string
   clientSecret: string
-  /** Wstrzykiwalny fetch - w testach zamiast sieci. */
+  /** Injectable fetch - used in tests instead of the network. */
   fetchImpl?: typeof fetch
-  /** Margines odswiezenia tokenu przed jego wygasnieciem, w sekundach. */
+  /** Margin for refreshing the token before it expires, in seconds. */
   refreshMarginSeconds?: number
   sandbox?: boolean
 }
@@ -52,9 +52,9 @@ export type TpayTransactionRequest = {
 }
 
 /**
- * Cialo zadania `POST /transactions/{id}/pay`. Uwaga: tu pola leza PLASKO,
- * a przy tworzeniu transakcji te same pola siedza pod kluczem `pay`.
- * Zrodlo: tpay-com/tpay-woocommerce, includes/TpayBlik.php.
+ * Body of the `POST /transactions/{id}/pay` request. Note: here the fields sit
+ * FLAT, while on transaction creation the same fields sit under the `pay` key.
+ * Source: tpay-com/tpay-woocommerce, includes/TpayBlik.php.
  */
 export type TpayPayRequest = {
   blikPaymentData?: {
@@ -111,7 +111,7 @@ export class TpayClient {
     this.refreshMarginSeconds = refreshMarginSeconds ?? 60
   }
 
-  /** Zwraca wazny token, biorac go z pamieci albo pobierajac nowy. */
+  /** Returns a valid token, taking it from memory or fetching a new one. */
   public async getAccessToken(forceRefresh = false): Promise<string> {
     if (!forceRefresh && this.token && this.token.expiresAt > Date.now()) {
       return this.token.value
@@ -150,15 +150,15 @@ export class TpayClient {
   }
 
   /**
-   * Dosyla dane platnosci do istniejacej transakcji. Tak dziala BLIK 0:
-   * transakcja powstaje bez metody, a kod z kasy sklepu idzie osobnym zadaniem,
-   * dzieki czemu odrzucony albo przeterminowany kod da sie powtorzyc bez
-   * zakladania nowej transakcji.
+   * Sends payment data to an existing transaction. This is how BLIK 0 works:
+   * the transaction is created without a method, and the code from the shop
+   * checkout goes in a separate request, so a rejected or expired code can be
+   * retried without creating a new transaction.
    *
-   * UWAGA: `result: success` w odpowiedzi znaczy tylko tyle, ze Tpay przyjal
-   * zadanie. NIE znaczy, ze kod jest poprawny - zmierzone 07.09.2026 na
-   * piaskownicy, gdzie kod `abcdef` przeszedl jako `success`/`pending`.
-   * Rozstrzygniecie przychodzi pozniej, statusem transakcji i powiadomieniem.
+   * NOTE: `result: success` in the response means only that Tpay accepted the
+   * request. It does NOT mean the code is correct - measured 07.09.2026 on the
+   * sandbox, where the code `abcdef` went through as `success`/`pending`.
+   * The verdict comes later, in the transaction status and the notification.
    */
   public async payByTransactionId(
     transactionId: string,
@@ -201,8 +201,8 @@ export class TpayClient {
   }
 
   /**
-   * Jedno ponowienie po 401: token moze wygasnac miedzy sprawdzeniem a dotarciem
-   * zadania do Tpay, a takze po restarcie po stronie dostawcy.
+   * A single retry after a 401: the token can expire between the check and the
+   * request reaching Tpay, and also after a restart on the provider's side.
    */
   private async request<T>(method: string, path: string, payload?: unknown): Promise<T> {
     const send = async (token: string): Promise<Response> =>

@@ -4,53 +4,55 @@ import type { TpayPayer } from './client.js'
 
 export type TpayAdapterArgs = {
   /**
-   * Identyfikator klienta OAuth z panelu Tpay (Integracja > API).
-   * Domyslnie `process.env.TPAY_CLIENT_ID`.
+   * OAuth client identifier from the Tpay panel (Integration > API).
+   * Defaults to `process.env.TPAY_CLIENT_ID`.
    */
   clientId?: string
-  /** Sekret OAuth. Domyslnie `process.env.TPAY_CLIENT_SECRET`. */
+  /** OAuth secret. Defaults to `process.env.TPAY_CLIENT_SECRET`. */
   clientSecret?: string
   /**
-   * Jezyk strony platnosci Tpay ('pl', 'en', ...). Domyslnie 'pl'.
+   * Language of the Tpay payment page ('pl', 'en', ...). Defaults to 'pl'.
    */
   lang?: string
   /**
-   * Identyfikator sprzedawcy - liczba z panelu. Wchodzi do sumy kontrolnej
-   * powiadomienia. Domyslnie `process.env.TPAY_MERCHANT_ID`.
+   * Merchant identifier - the number from the panel. It goes into the
+   * notification checksum. Defaults to `process.env.TPAY_MERCHANT_ID`.
    */
   merchantId?: number | string
   /**
-   * Bezwzgledny adres, pod ktory Tpay wysle powiadomienie o zmianie statusu.
-   * Zwykle `https://twoj-sklep.pl/api/payments/tpay/notifications`.
-   * Domyslnie budowany z `process.env.NEXT_PUBLIC_SERVER_URL` albo
+   * Absolute URL that Tpay will send status change notifications to.
+   * Usually `https://your-shop.example.com/api/payments/tpay/notifications`.
+   * Built by default from `process.env.NEXT_PUBLIC_SERVER_URL` or
    * `process.env.PAYLOAD_PUBLIC_SERVER_URL`.
    */
   notificationUrl?: string
-  /** Adres powrotu po nieudanej platnosci. */
+  /** Return URL after a failed payment. */
   payerErrorUrl?: string
-  /** Adres powrotu po udanej platnosci. */
+  /** Return URL after a successful payment. */
   payerSuccessUrl?: string
   /**
-   * Wymusza sandbox. Domyslnie `process.env.TPAY_SANDBOX === 'true'`.
+   * Forces the sandbox. Defaults to `process.env.TPAY_SANDBOX === 'true'`.
    */
   sandbox?: boolean
   /**
-   * Kod bezpieczenstwa powiadomien z panelu Tpay. Bez niego powiadomienia
-   * sa odrzucane, bo nie ma czym potwierdzic ich autentycznosci.
-   * Domyslnie `process.env.TPAY_SECURITY_CODE`.
+   * Notification security code from the Tpay panel. Without it notifications
+   * are rejected, because there is nothing to confirm their authenticity with.
+   * Defaults to `process.env.TPAY_SECURITY_CODE`.
    */
   securityCode?: string
   /**
-   * Sprawdzanie podpisu JWS (naglowek X-JWS-Signature) obok sumy md5.
-   * Domyslnie `true`; `false` wylacza jawnie. Wymaga polaczenia wychodzacego
-   * po certyfikat Tpay. Suma md5 nie obejmuje `tr_status` ani `tr_paid`,
-   * wiec bez JWS jedno prawdziwe cialo powiadomienia da sie przerobic na
-   * „zaplacone" bez znajomosci kodu bezpieczenstwa.
+   * Verification of the JWS signature (X-JWS-Signature header) alongside the
+   * md5 checksum. Defaults to `true`; `false` turns it off explicitly. Requires
+   * an outgoing connection to fetch the Tpay certificate. The md5 checksum
+   * covers neither `tr_status` nor `tr_paid`, so without JWS a single genuine
+   * notification body can be reworked into "paid" without knowing the security
+   * code.
    */
   verifyJws?: boolean
   /**
-   * Certyfikat glowny Tpay w PEM, do sprawdzenia lancucha przy `verifyJws`.
-   * Bez niego sprawdzany jest sam podpis i okno waznosci certyfikatu.
+   * Tpay root certificate in PEM, used to check the chain when `verifyJws` is
+   * on. Without it only the signature itself and the certificate validity
+   * window are checked.
    */
   jwsRootCertificate?: string
 } & PaymentAdapterArgs

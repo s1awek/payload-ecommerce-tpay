@@ -9,14 +9,15 @@ import type { TpayAdapterArgs } from './types.js'
 type AnyDoc = Record<string, any>
 
 /**
- * Status transakcji zwracany przez API Tpay dla platnosci zaksiegowanej.
- * Zrodlo: oficjalny przyklad SDK (`examples/TransactionsApi/CardGate.php`).
+ * Transaction status the Tpay API returns for a settled payment.
+ * Source: the official SDK example (`examples/TransactionsApi/CardGate.php`).
  */
 export const TPAY_STATUS_PAID = 'correct'
 
 /**
- * Statusy, po ktorych platnosc juz nie dojdzie do skutku. Kazdy inny
- * (w tym `pending`) traktujemy jako „jeszcze w toku" i transakcji nie ruszamy.
+ * Statuses after which the payment will no longer go through. Any other one
+ * (including `pending`) we treat as "still in progress" and leave the
+ * transaction alone.
  */
 const FAILED_STATUSES = new Set(['declined', 'error', 'expired', 'rejected'])
 
@@ -63,15 +64,17 @@ export const confirmOrder =
         throw new Error('No transaction found for the provided identifier.')
       }
 
-      // Lokalne `find` omija kontrole dostepu Payloada, a identyfikatory
-      // transakcji sa kolejnymi liczbami. Bez tej bramki kazdy, kto przeszedl
-      // kontrole wtyczki wlasnym koszykiem, moglby potwierdzac cudze transakcje
-      // i odbierac ich `orderID` oraz `accessToken`. Dowody sa te same, co przy
-      // punktach BLIK-a: zalogowany wlasciciel albo sekret koszyka.
+      // The local `find` bypasses Payload's access control, and transaction
+      // identifiers are consecutive numbers. Without this gate anyone who got
+      // past the plugin's checks with their own cart could confirm other
+      // people's transactions and collect their `orderID` and `accessToken`.
+      // The proofs are the same as on the BLIK endpoints: the logged-in owner
+      // or the cart secret.
       await assertTransactionAccess({ cartsSlug, req, secret: data.secret, transaction })
 
-      // Powiadomienie od Tpay moglo juz zamknac te transakcje - wtedy nie ma
-      // czego potwierdzac, jest gotowe zamowienie do zwrocenia.
+      // A notification from Tpay may have closed this transaction already - in
+      // that case there is nothing to confirm, there is a finished order to
+      // return.
       if (transaction.order) {
         const finished = await finalizeOrder({
           cartsSlug,
@@ -90,25 +93,26 @@ export const confirmOrder =
         }
       }
 
-      // Identyfikator Tpay bierzemy WYLACZNIE z dokumentu transakcji. Ten z ciala
-      // zadania sluzy tylko do odnalezienia dokumentu; gdyby byl dowodem, kupujacy
-      // moglby podstawic identyfikator wlasnej, taniej transakcji pod droga,
-      // ktora nie dostala jeszcze swojego (okno miedzy `create` a zapisem).
+      // We take the Tpay identifier EXCLUSIVELY from the transaction document.
+      // The one in the request body only serves to find the document; were it
+      // proof, a buyer could substitute the identifier of their own cheap
+      // transaction for an expensive one that has not been given its own yet
+      // (the window between `create` and the write).
       const remoteID = transaction.tpay?.transactionId
 
       if (!remoteID) {
         throw new Error('The transaction has no Tpay transaction ID to verify against.')
       }
 
-      // Stan platnosci bierzemy z API Tpay, nigdy z tego, co przyniosla
-      // przegladarka: adres powrotu jest po stronie klienta i da sie go otworzyc
-      // recznie, bez placenia czegokolwiek.
+      // We take the payment state from the Tpay API, never from whatever the
+      // browser brought with it: the return URL lives on the client side and
+      // can be opened by hand, without paying for anything.
       const remote = await client.getTransaction(String(remoteID))
 
       if (remote?.status !== TPAY_STATUS_PAID) {
-        // Platnosc w toku zostaje w stanie `pending`: klient moze jeszcze
-        // dokonczyc przelew, a przestawienie na `failed` skasowaloby mu koszyk.
-        // Na `failed` schodzimy dopiero przy rozstrzygnietej odmowie.
+        // A payment in progress stays in `pending`: the customer may still
+        // finish the transfer, and switching it to `failed` would wipe their
+        // cart. We go down to `failed` only on a settled refusal.
         if (FAILED_STATUSES.has(String(remote?.status))) {
           await markTransactionStatus({
             req,
@@ -123,8 +127,9 @@ export const confirmOrder =
         )
       }
 
-      // `correct` znaczy „jakas transakcja oplacona". Ma to byc ta sama kwota
-      // i waluta, co w naszym dokumencie, inaczej dowod jest nie na te zakupy.
+      // `correct` means "some transaction was paid". It has to be the same
+      // amount and currency as in our document, otherwise the proof is not for
+      // these purchases.
       assertRemoteMatchesTransaction({ remote, transaction })
 
       const finished = await finalizeOrder({

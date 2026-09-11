@@ -50,6 +50,15 @@ export default buildConfig({
 })
 ```
 
+**Konfigurację `access` wtyczki zostaw w spokoju, dopóki nie wiesz, czego pilnuje każda funkcja.**
+Gospodarz deweloperski w [`dev/`](dev/README.md) ustawia `isDocumentOwner: () => true` i
+`publicAccess: () => true`, żeby skrypty mogły go obsłużyć bez logowania. Przeniesiona do sklepu
+taka konfiguracja pozwala dowolnemu zalogowanemu klientowi założyć zamówienie samym `POST /api/orders`,
+bez płacenia: wtyczka daje `orders` i `transactions` uprawnienie `create: isAdmin`, a `isAdmin` tego
+gospodarza to "dowolny zalogowany użytkownik". Nic w tym adapterze nie obroni sklepu, którego własne
+kolekcje przyjmują zamówienia od każdego. Zostaw domyślne ustawienia wtyczki albo napisz funkcje
+access sprawdzające rolę.
+
 Po stronie przeglądarki, tam gdzie konfigurujesz front sklepu:
 
 ```ts
@@ -84,7 +93,7 @@ Pełny publiczny adres tego punktu ustaw jako adres powiadomień: albo per trans
 1. Front sklepu woła `POST /api/payments/tpay/initiate`. Adapter zapisuje transakcję w stanie `pending`, tworzy odpowiadającą jej transakcję w Tpay i zwraca `paymentUrl`.
 2. Front przekierowuje klienta na `paymentUrl`.
 3. Tpay pobiera płatność i wysyła powiadomienie serwer-serwer na punkt powyżej. Adapter je weryfikuje i tworzy zamówienie.
-4. Klient wraca na `payerSuccessUrl`, a front woła `POST /api/payments/tpay/confirm-order` z `transactionID` zwróconym w kroku 1 **oraz z `cartID`** (a przy koszyku gościa dodatkowo z jego `secret`). Sam adapter potrzebuje wyłącznie transakcji, ale handler wtyczki odrzuca żądanie komunikatem `Cart ID is required.`, zanim w ogóle dojdzie do adaptera, więc trzeba wysłać oba.
+4. Klient wraca na `payerSuccessUrl`, a front woła `POST /api/payments/tpay/confirm-order` z `transactionID` zwróconym w kroku 1 **oraz z `cartID`** (a przy koszyku gościa dodatkowo z jego `secret`). Handler wtyczki odrzuca żądanie komunikatem `Cart ID is required.`, zanim w ogóle dojdzie do adaptera, a adapter potem sprawdza ten sam `secret` (albo zalogowanego właściciela) wobec potwierdzanej transakcji, więc wyślij komplet.
 
 Kroki 3 i 4 domykają zamówienie niezależnie od siebie, w dowolnej kolejności, i żaden nie tworzy drugiego. To nie jest szczegół: przy płatności z przekierowaniem nie ma gwarancji, że przeglądarka w ogóle wróci. Klient potrafi zapłacić BLIKiem i zamknąć kartę.
 
@@ -119,10 +128,14 @@ Punkt odbioru powiadomień to publiczny adres, więc wszystko w nim jest napisan
 
 - **Suma kontrolna.** Każde powiadomienie niesie md5 policzone z identyfikatora sprzedawcy, numeru transakcji, kwoty, pola `tr_crc` i kodu bezpieczeństwa. Powiadomienie bez zgodnej sumy dostaje HTTP 400 i nie tworzy zamówienia. Brak konfiguracji też jest odmową, nigdy cichym przepuszczeniem.
 - **Czego suma NIE obejmuje.** Te pięć składników to cały przepis, więc `tr_status`, `tr_paid`, `tr_currency`, `tr_email` i `test_mode` zostają poza nim: zmiana któregokolwiek z nich nie psuje sumy. Dwa z nich, `tr_status` i `tr_paid`, to dokładnie te pola, z których adapter odczytuje, że zamówienie jest opłacone. Suma potwierdza więc, **której** transakcji dotyczy wiadomość, a nie **co się z nią stało**. Zmierzone na prawdziwym powiadomieniu z piaskownicy, przypięte testem `test/notification-shape.test.js`.
-- **Podpis JWS.** Druga warstwa, włączana przez `verifyJws: true`, i jedyna obejmująca całe ciało razem z polami wymienionymi wyżej. Na produkcji włączać. Certyfikat pobierany jest wyłącznie z hosta Tpay właściwego dla środowiska, więc podstawiony `x5u` wskazujący gdziekolwiek indziej odpada, zanim poleci jakiekolwiek żądanie wychodzące. Podanie `jwsRootCertificate` dokłada sprawdzenie łańcucha do korzenia Tpay.
+- **Podpis JWS.** Druga warstwa, **włączona domyślnie**, i jedyna obejmująca całe ciało razem z polami wymienionymi wyżej. Powiadomienie bez poprawnego nagłówka `X-JWS-Signature` dostaje HTTP 400. Certyfikat pobierany jest wyłącznie z hosta Tpay właściwego dla bieżącego środowiska, więc podstawiony `x5u` wskazujący gdziekolwiek indziej odpada, zanim poleci jakiekolwiek żądanie wychodzące. Podanie `jwsRootCertificate` dokłada sprawdzenie łańcucha do korzenia Tpay. `verifyJws: false` wyłącza tę warstwę, przez co opłacone zamówienie dzieli od każdego, kto trafi na ten punkt, tylko jedno wyciekłe ciało powiadomienia - rób to świadomie.
 - **`test_mode` nie jest znacznikiem środowiska.** Powiadomienie z piaskownicy przychodzi z `test_mode=0`. Nie rozstrzygaj po tym polu, czy ruch jest testowy - do tego służy własna konfiguracja.
 - **Niedopłata.** Przy zwykłym przelewie kwotę wpisuje płatnik. Jeśli wpłynie mniej, niż wynosi zamówienie, zamówienie nie powstaje, a transakcja zostaje w stanie `pending` z wpisem w logu.
 - **Stan płatności bierzemy z API Tpay, nigdy z przeglądarki.** Adres powrotu jest po stronie klienta i da się go otworzyć ręcznie, więc `confirm-order` pyta Tpay, co się faktycznie stało.
+- **Dowód zapłaty musi dotyczyć tej konkretnej transakcji.** `confirm-order` i `/blik-status` pytają Tpay o identyfikator transakcji zapisany na dokumencie, nigdy o ten podany w żądaniu, a odpowiedź `correct` liczy się tylko wtedy, gdy Tpay zgłasza tę samą kwotę i walutę co dokument. Bez tego kupujący mógłby zapłacić za tanią transakcję i przedstawić tę zapłatę jako dowód dla drogiej. Niezgodność jest odrzucana, tak samo jak odpowiedź API bez podanej kwoty w ogóle: zmiana kształtu API głośno zatrzymuje sprzedaż, zamiast przepuszczać wszystko bez sprawdzenia.
+- **Nikt nie potwierdza transakcji, której nie potrafi udowodnić, że jest jego.** Identyfikatory transakcji to kolejne liczby całkowite, a lokalne API Payloada omija kontrolę dostępu kolekcji, więc `confirm-order` stosuje tę samą bramkę co punkty BLIK: żądanie musi pochodzić od zalogowanego właściciela transakcji albo nieść `secret` koszyka. Ta bramka stoi też przed odpowiedzią "already confirmed", więc `accessToken` zamówienia nigdy nie trafia do obcego, który zgadł identyfikator.
+- **Adres z transakcji wygrywa.** Zamówienie powstaje z e-mailem klienta zapisanym przy `initiate`. E-mail podany w późniejszym żądaniu uzupełnia lukę tylko wtedy, gdy transakcja go nie ma, więc znajomość czyjegoś identyfikatora transakcji nie pozwala przejąć jego zamówienia.
+- **Błędy zostawiają szczegóły w logu.** Wszystko, co nie jest zamierzoną odpowiedzią (`403`, `409`), wraca z punktów BLIK jako stały komunikat; treść wyjątku źródłowego, łącznie ze ścieżkami API Tpay i kodami statusów, trafia wyłącznie do loggera Payloada.
 
 ## Kwoty
 
@@ -157,6 +170,14 @@ decimalStringToMinor('19.99') // 1999
   wywołuje `confirm-order` i nie dociera do zdejmowania stanu we wtyczce. Zmierzone na żywej
   instancji: domknięta płatność BLIK-iem utworzyła zamówienie i zostawiła stan na 5. Stan trzeba
   zdjąć samodzielnie, raz, przy pierwszej odpowiedzi `paid` z `/blik-status`.
+- **Znacznik "stan już skorygowany" zapisuj na zamówieniu, nie w pamięci procesu.** Sklep demo
+  trzyma ten znacznik w zbiorze na poziomie procesu, co wystarcza do demo, ale jest błędem w sklepie:
+  restart go zapomina, a kolejna odpowiedź `paid` zdejmie stan z tej samej transakcji jeszcze raz.
+  Zapisz go na dokumencie zamówienia.
+- **Chargeback zmienia transakcję, nie zamówienie.** Powiadomienie `CHARGEBACK` ustawia transakcję
+  na `refunded`, a zamówienie zostawia w stanie `processing`. Sklep, który obserwuje wyłącznie
+  zamówienia, nie zobaczy, że pieniądze wróciły - obserwuj status transakcji albo dodaj hak, który
+  go odzwierciedla.
 - **Domknięcie zamówienia nie jest atomowym compare-and-swap.** `payload.update` z warunkiem `where` to wyszukanie, a dopiero potem zapis po dokumencie, więc zostaje wąskie okno, w którym powiadomienie i przeglądarka uznają się jednocześnie za tego, kto domknął zamówienie. Skutkiem jest osierocony dokument zamówienia, nigdy podwójne obciążenie, bo płatność jest jedna. Domknięcie okna oznaczałoby ominięcie haków kolekcji, co jest gorszym wyborem.
 - Płatności cykliczne, tokenizacja kart, transakcje marketplace i zwroty przez API nie są zaimplementowane.
 

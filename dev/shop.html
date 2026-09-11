@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demo shop - Tpay adapter for Payload</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --card: #ffffff; --text: #1d1c1a; --gray: #6b6660; --line: #e4e0d8;
+    --accent: #0f5f4a; --accent-bg: #e3f1ec; --warn: #9a4b12; --warn-bg: #fbecdf; --error: #a82525; --error-bg: #fbe5e5;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--line); background: var(--card); }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: .01em; }
+  header h1 small { color: var(--gray); font-weight: 400; font-size: 14px; margin-left: 10px; }
+  header button { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; font: inherit; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .product { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+  .product .image { aspect-ratio: 4/3; border-radius: 8px; background: repeating-linear-gradient(135deg, #dfe8e3 0 6px, #eef3f0 6px 14px); }
+  .product h3 { margin: 0; font-size: 17px; font-weight: 600; }
+  .product .price { font-size: 18px; }
+  .product .stock { color: var(--gray); font-size: 13px; }
+  .button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 11px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+  .button.secondary { background: #fff; color: var(--text); border: 1px solid var(--line); }
+  .button:disabled { opacity: .5; cursor: default; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
+  .two-col { display: grid; grid-template-columns: 1.2fr .8fr; gap: 20px; }
+  @media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }
+  h2 { margin: 0 0 14px; font-size: 20px; }
+  label { display: block; font-size: 13px; color: var(--gray); margin: 12px 0 4px; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: #fff; }
+  input.blik { font-size: 30px; letter-spacing: .35em; text-align: center; font-variant-numeric: tabular-nums; }
+  .line-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+  .total { display: flex; justify-content: space-between; font-weight: 700; font-size: 18px; padding-top: 10px; }
+  .methods { display: grid; gap: 12px; margin-top: 18px; }
+  .method { border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .method h4 { margin: 0 0 6px; font-size: 15px; }
+  .method p { margin: 0 0 10px; color: var(--gray); font-size: 14px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .status { border-radius: 10px; padding: 14px 16px; margin: 14px 0; }
+  .status.ok { background: var(--accent-bg); color: var(--accent); }
+  .status.waiting { background: #eef1f6; color: #2d3e5e; }
+  .status.warn { background: var(--warn-bg); color: var(--warn); }
+  .status.error { background: var(--error-bg); color: var(--error); }
+  .dots::after { content: ''; animation: dots 1.2s steps(4) infinite; }
+  @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
+  .db { font-size: 13px; color: var(--gray); }
+  .db table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .db td { padding: 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .db td:first-child { color: var(--text); width: 45%; }
+  .db .changed { color: var(--warn); font-weight: 600; }
+  .small { font-size: 13px; color: var(--gray); }
+  code { background: #f0ede6; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  .empty { color: var(--gray); text-align: center; padding: 40px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Demo shop <small>Payload 3 + plugin-ecommerce + Tpay adapter (sandbox)</small></h1>
+  <button id="btn-cart" onclick="show('checkout')">Cart: <span id="counter">0</span></button>
+</header>
+
+<main>
+  <!-- CATALOGUE -->
+  <section id="view-catalog">
+    <div id="grid" class="grid"></div>
+  </section>
+
+  <!-- CHECKOUT -->
+  <section id="view-checkout" hidden>
+    <div class="two-col">
+      <div class="panel">
+        <h2>Checkout</h2>
+        <div id="items"></div>
+        <div class="total"><span>Total</span><span id="total"></span></div>
+
+        <label>Email</label><input id="f-email" value="buyer@example.invalid">
+        <div class="row">
+          <div style="flex:1"><label>First name</label><input id="f-firstname" value="John"></div>
+          <div style="flex:1"><label>Last name</label><input id="f-lastname" value="Tester"></div>
+        </div>
+        <div class="row">
+          <div style="flex:2"><label>City</label><input id="f-city" value="Warsaw"></div>
+          <div style="flex:1"><label>Postal code</label><input id="f-postalcode" value="00-001"></div>
+        </div>
+
+        <div class="methods">
+          <div class="method">
+            <h4>BLIK: type the code here, without leaving the shop</h4>
+            <p>Six digits from the banking app. In the sandbox: <code>777123</code> succeeds, <code>000000</code> is refused.</p>
+            <input id="blik" class="blik" inputmode="numeric" maxlength="7" placeholder="000 000" autocomplete="off">
+            <div class="row" style="margin-top:10px">
+              <button class="button" id="btn-blik" onclick="payWithBlik()">Pay with BLIK</button>
+            </div>
+          </div>
+          <div class="method">
+            <h4>Another method: transfer, card, BLIK on the Tpay page</h4>
+            <p>Redirect to the Tpay page and back to the shop. This path requires a public tunnel (server to server notification).</p>
+            <button class="button secondary" id="btn-tpay" onclick="payOnTpay()">Pay on the Tpay page</button>
+          </div>
+        </div>
+        <p class="small" style="margin-top:16px"><a href="#" onclick="show('catalog');return false">&larr; back to catalogue</a></p>
+      </div>
+
+      <div class="panel db">
+        <h2 style="font-size:16px">What's happening underneath</h2>
+        <div id="log" class="small">Nothing yet. The cart is created only when paying.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PAYMENT / RESULT -->
+  <section id="view-payment" hidden>
+    <div class="two-col">
+      <div class="panel">
+        <h2 id="p-title">Payment</h2>
+        <div id="p-status"></div>
+        <div id="p-retry" hidden>
+          <label>Type the BLIK code again</label>
+          <input id="blik2" class="blik" inputmode="numeric" maxlength="7" placeholder="000 000" autocomplete="off">
+          <div class="row" style="margin-top:10px">
+            <button class="button" id="btn-blik2" onclick="retryBlik()">Pay with BLIK</button>
+            <span class="small">The cart and the transaction stay the same, a second order is not created.</span>
+          </div>
+        </div>
+        <div id="p-done" hidden class="row" style="margin-top:16px">
+          <button class="button secondary" onclick="newPurchase()">New purchase</button>
+        </div>
+      </div>
+      <div class="panel db">
+        <h2 style="font-size:16px">What happened in the database</h2>
+        <div id="db">Waiting for data&hellip;</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// ---------- shop state (in the browser) ----------
+const API = '/api/payments/tpay';
+let products = [];
+let cart = JSON.parse(sessionStorage.getItem('cart') || '{}');   // {productId: quantity}
+let payment = null;                                              // {transactionID, secret, cartID}
+let stockBefore = null;                                          // stock levels before payment
+let pollTimer = null;
+
+const money = (cents) => (cents / 100).toLocaleString('pl-PL', { style: 'currency', currency: 'PLN' });
+const $ = (id) => document.getElementById(id);
+const saveCart = () => { sessionStorage.setItem('cart', JSON.stringify(cart)); $('counter').textContent = Object.values(cart).reduce((a, b) => a + b, 0); };
+const post = async (url, body) => { const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch {} return { status: r.status, body: j }; };
+const logLine = (t) => { const el = $('log'); if (el.textContent.startsWith('Nothing yet')) el.textContent = ''; const d = document.createElement('div'); d.textContent = new Date().toLocaleTimeString('pl-PL') + '  ' + t; el.appendChild(d); };
+
+function show(name) {
+  for (const w of ['catalog', 'checkout', 'payment']) $('view-' + w).hidden = w !== name;
+  if (name === 'checkout') renderCheckout();
+}
+
+// ---------- catalogue ----------
+async function loadProducts() {
+  const r = await fetch('/shop/products'); products = (await r.json()).products;
+  const s = $('grid'); s.innerHTML = '';
+  if (!products.length) { s.innerHTML = '<p class="empty">No demo products.</p>'; return; }
+  for (const p of products) {
+    const el = document.createElement('div'); el.className = 'product';
+    el.innerHTML = `<div class="image"></div><h3>${p.title.replace(/^Demo: /, '')}</h3>
+      <div class="price">${money(p.price)}</div><div class="stock">in stock: ${p.stock}</div>
+      <button class="button" ${p.stock <= 0 ? 'disabled' : ''} onclick="addToCart(${p.id})">Add to cart</button>`;
+    s.appendChild(el);
+  }
+}
+function addToCart(id) { cart[id] = (cart[id] || 0) + 1; saveCart(); show('checkout'); }
+function removeFromCart(id) { delete cart[id]; saveCart(); renderCheckout(); }
+
+// ---------- checkout ----------
+function renderCheckout() {
+  const el = $('items'); el.innerHTML = ''; let total = 0;
+  for (const [id, quantity] of Object.entries(cart)) {
+    const p = products.find((x) => String(x.id) === String(id)); if (!p) continue;
+    total += p.price * quantity;
+    const d = document.createElement('div'); d.className = 'line-item';
+    d.innerHTML = `<span>${p.title.replace(/^Demo: /, '')} &times; ${quantity}</span><span>${money(p.price * quantity)} <a href="#" onclick="removeFromCart(${id});return false" class="small">remove</a></span>`;
+    el.appendChild(d);
+  }
+  if (!el.children.length) el.innerHTML = '<p class="empty">The cart is empty.</p>';
+  $('total').textContent = money(total);
+  $('btn-blik').disabled = $('btn-tpay').disabled = total === 0;
+}
+
+const buyerData = () => ({
+  customerEmail: $('f-email').value.trim(),
+  billingAddress: { firstName: $('f-firstname').value.trim(), lastName: $('f-lastname').value.trim(), city: $('f-city').value.trim(), postalCode: $('f-postalcode').value.trim(), country: 'PL' },
+});
+
+/** Cart in Payload + initiate through the plugin's endpoint. Shared by both methods. */
+async function createPayment() {
+  const items = Object.entries(cart).map(([product, quantity]) => ({ product: Number(product), quantity }));
+  stockBefore = Object.fromEntries(products.map((p) => [p.id, p.stock]));
+  const k = await post('/shop/cart', { items });
+  if (k.status !== 200) throw new Error('cart: ' + (k.body?.message || k.status));
+  logLine(`cart #${k.body.id} created, ${money(k.body.subtotal)}`);
+  const init = await post(`${API}/initiate`, { ...buyerData(), cartID: k.body.id, secret: k.body.secret });
+  if (init.status !== 200 || !init.body?.transactionID) throw new Error('initiate: ' + (init.body?.message || init.status));
+  logLine(`initiate -> transaction #${init.body.transactionID} (Tpay returned a payment address)`);
+  payment = { transactionID: init.body.transactionID, secret: k.body.secret, cartID: k.body.id, paymentUrl: init.body.paymentUrl };
+  sessionStorage.setItem('payment', JSON.stringify(payment));
+  return payment;
+}
+
+// ---------- BLIK level 0 ----------
+async function payWithBlik() {
+  const code = $('blik').value.replace(/[\s-]/g, '');
+  if (!/^\d{6}$/.test(code)) { $('blik').focus(); $('blik').style.borderColor = 'var(--error)'; return; }
+  $('btn-blik').disabled = true;
+  try {
+    await createPayment();
+    show('payment'); $('p-title').textContent = 'BLIK payment';
+    await sendCode(code);
+  } catch (e) { show('payment'); setStatus('error', 'Could not create the payment: ' + e.message); $('p-done').hidden = false; }
+  finally { $('btn-blik').disabled = false; }
+}
+
+async function sendCode(code) {
+  setStatus('waiting', '<b>Code sent.</b> Confirm the payment in your banking app<span class="dots"></span><br><span class="small">Nothing redirects. The shop polls the status every 2 seconds.</span>');
+  $('p-retry').hidden = true;
+  const r = await post(`${API}/blik`, { transactionID: payment.transactionID, secret: payment.secret, blikToken: code });
+  if (r.status !== 200) { setStatus('error', 'Code was not accepted: ' + (r.body?.message || r.status)); $('p-retry').hidden = false; return; }
+  refreshDb();
+  poll();
+}
+
+function poll() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    const r = await post(`${API}/blik-status`, { transactionID: payment.transactionID, secret: payment.secret });
+    const s = r.body?.status;
+    if (s === 'paid') {
+      clearInterval(pollTimer);
+      // The BLIK path does not decrement stock (see the package README). The shop does it itself, once.
+      const z = await post('/shop/decrement-stock', { transactionID: payment.transactionID, secret: payment.secret });
+      setStatus('ok', `<b>Paid.</b> Order no. ${r.body.orderID} was created.<br><span class="small">Stock: ${z.body?.decremented ? 'decremented by the shop on the first "paid" read' : 'not decremented (' + (z.body?.reason || '?') + ')'}.</span>`);
+      finish();
+    } else if (s === 'rejected') {
+      clearInterval(pollTimer);
+      setStatus('warn', `<b>The bank refused the code</b> (Tpay error code: ${r.body.tpayErrorCode}). The payment stays open, type a new code.`);
+      $('p-retry').hidden = false; $('blik2').value = ''; $('blik2').focus();
+      refreshDb();
+    } else if (s === 'failed') {
+      clearInterval(pollTimer);
+      setStatus('error', `<b>Payment failed</b> (Tpay status: ${r.body.tpayStatus}). Start over.`);
+      finish();
+    } else if (r.status !== 200) {
+      clearInterval(pollTimer);
+      setStatus('error', 'Error reading status: ' + (r.body?.message || r.status));
+      finish();
+    }
+  }, 2000);
+}
+
+async function retryBlik() {
+  const code = $('blik2').value.replace(/[\s-]/g, '');
+  if (!/^\d{6}$/.test(code)) { $('blik2').focus(); return; }
+  await sendCode(code);
+}
+
+// ---------- redirect to Tpay ----------
+async function payOnTpay() {
+  // Tpay sends the buyer back to the PUBLIC address; sessionStorage is per origin, so this path
+  // must start on the same address it will return to. Under 127.0.0.1 we jump to the tunnel.
+  const k = await (await fetch('/shop/config')).json();
+  if (k.publicAddress && location.origin !== k.publicAddress) {
+    if (confirm('This method returns to the public address ' + k.publicAddress + '. Open the shop at that address? The cart will be kept.')) {
+      location.href = k.publicAddress + '/?cart=' + encodeURIComponent(JSON.stringify(cart)) + '#checkout';
+    }
+    return;
+  }
+  $('btn-tpay').disabled = true;
+  try {
+    const p = await createPayment();
+    if (!p.paymentUrl) throw new Error('no payment address in the initiate response');
+    logLine('redirecting to the Tpay page...');
+    location.href = p.paymentUrl;
+  } catch (e) { alert('Could not create the payment: ' + e.message); $('btn-tpay').disabled = false; }
+}
+
+/** Return from the Tpay page: confirm-order exactly ONCE per transaction (the plugin decrements stock on every call). */
+async function handleReturn(route) {
+  payment = JSON.parse(sessionStorage.getItem('payment') || 'null');
+  show('payment'); $('p-title').textContent = 'Return from the Tpay page';
+  if (!payment) { setStatus('error', 'No remembered payment in this browser tab.'); finish(); return; }
+  if (route === '/error') { setStatus('error', '<b>Payment failed or was interrupted.</b> Tpay sent us back to the error address.'); finish(); return; }
+  const key = 'confirmed:' + payment.transactionID;
+  if (sessionStorage.getItem(key)) {
+    setStatus('warn', '<b>Return page reloaded.</b> confirm-order is not called a second time (protects stock from being decremented twice). Below is the state from the database.');
+    finish(); return;
+  }
+  setStatus('waiting', 'Checking the payment status with Tpay<span class="dots"></span>');
+  sessionStorage.setItem(key, '1');
+  // The plugin requires the cart and its secret (guest), the adapter takes transactionID; without cartID it answers 400 "Cart ID is required".
+  const r = await post(`${API}/confirm-order`, { cartID: payment.cartID, secret: payment.secret, customerEmail: $('f-email').value.trim() || 'buyer@example.invalid', transactionID: payment.transactionID });
+  if (r.status === 200) setStatus('ok', `<b>Paid.</b> ${r.body?.message || ''} Order no. ${r.body?.orderID ?? '(see the database)'}.`);
+  else {
+    // The buyer sees a fixed message; the response content goes to the console and to the server log.
+    console.warn('confirm-order', r.status, r.body);
+    setStatus('error', "<b>Could not confirm the payment.</b> If money was taken, the order will be closed by Tpay's notification. Details of the response are in the browser console.");
+  }
+  finish();
+}
+
+// ---------- shared ----------
+function setStatus(type, htmlContent) { $('p-status').innerHTML = `<div class="status ${type}">${htmlContent}</div>`; }
+function finish() { $('p-done').hidden = false; refreshDb(); cart = {}; saveCart(); }
+function newPurchase() { payment = null; sessionStorage.removeItem('payment'); history.replaceState(null, '', '/'); loadProducts().then(() => show('catalog')); }
+
+async function refreshDb() {
+  if (!payment) return;
+  const r = await post('/shop/state', { transactionID: payment.transactionID, secret: payment.secret }); const s = r.body;
+  if (r.status !== 200 || !s) { $('db').innerHTML = '<p>No access to the state of this transaction.</p>'; return; }
+  const t = s.transaction, z = s.order;
+  const rows = [
+    ['transaction #' + t.id, `status <b>${t.status}</b>, ${money(t.amount)} ${t.currency}, Tpay id ${t.tpayId || '-'}`],
+    ['order', z ? `#${z.id}, status <b>${z.status}</b>, ${money(z.amount)}` : '<i>not yet</i>'],
+    ['cart', s.cart ? `#${s.cart.id}, ${s.cart.purchased ? 'marked as purchased' : 'open'}` : '-'],
+  ];
+  for (const p of s.products) {
+    const before = stockBefore?.[p.id];
+    const changed = before != null && before !== p.stock ? ` <span class="changed">(was ${before})</span>` : '';
+    rows.push([p.title.replace(/^Demo: /, ''), `stock ${p.stock}${changed}`]);
+  }
+  $('db').innerHTML = '<table>' + rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('') + '</table>' +
+    `<p style="margin:10px 0 0">Read from the host's SQLite through Payload's local API, ${new Date().toLocaleTimeString('pl-PL')}.</p>`;
+}
+
+// ---------- start ----------
+$('blik').addEventListener('input', (e) => { e.target.style.borderColor = ''; const c = e.target.value.replace(/\D/g, '').slice(0, 6); e.target.value = c.length > 3 ? c.slice(0, 3) + ' ' + c.slice(3) : c; });
+$('blik2').addEventListener('input', (e) => { const c = e.target.value.replace(/\D/g, '').slice(0, 6); e.target.value = c.length > 3 ? c.slice(0, 3) + ' ' + c.slice(3) : c; });
+const cartFromUrl = new URLSearchParams(location.search).get('cart');
+if (cartFromUrl) { try { cart = JSON.parse(cartFromUrl); } catch {} history.replaceState(null, '', '/'); }
+saveCart();
+loadProducts().then(() => {
+  if (cartFromUrl) { show('checkout'); return; }
+  if (location.pathname === '/return' || location.pathname === '/error') { stockBefore = JSON.parse(sessionStorage.getItem('stockBefore') || 'null'); handleReturn(location.pathname); }
+  else show('catalog');
+});
+// stock "before" must survive the redirect to Tpay
+const _createPayment = createPayment; createPayment = async function () { const p = await _createPayment(); sessionStorage.setItem('stockBefore', JSON.stringify(stockBefore)); return p; };
+</script>
+</body>
+</html>

@@ -7,16 +7,16 @@ type FinalizeArgs = {
   customerEmail?: string
   ordersSlug?: string
   req: PayloadRequest
-  /** Dokument transakcji z kolekcji `transactions`. */
+  /** Transaction document from the `transactions` collection. */
   transaction: AnyDoc
   transactionsSlug: string
 }
 
 export type FinalizeResult = {
-  /** Czy zamowienie powstalo w tym wywolaniu (false = bylo juz wczesniej). */
+  /** Whether the order was created in this call (false = it already existed). */
   created: boolean
   order: AnyDoc | null
-  /** Powod, dla ktorego zamowienia nie ma, gdy `order` jest puste. */
+  /** Reason why there is no order, when `order` is empty. */
   reason?: string
 }
 
@@ -33,31 +33,32 @@ const idOf = (value: unknown): string | undefined => {
 }
 
 /**
- * Zamyka zamowienie na podstawie transakcji, dokladnie raz.
+ * Closes an order from a transaction, exactly once.
  *
- * Wywoluja to dwie niezalezne sciezki: powiadomienie serwer-serwer od Tpay
- * i powrot przegladarki klienta (`confirmOrder`). Obie moga dojsc jednoczesnie,
- * a nawet czesto dochodza, bo Tpay wysyla powiadomienie w tej samej chwili,
- * w ktorej przeglada klienta wraca na strone sklepu.
+ * Two independent paths call this: the server-to-server notification from Tpay
+ * and the return of the customer's browser (`confirmOrder`). Both can arrive at
+ * the same time, and often do, because Tpay sends the notification at the very
+ * moment the customer's browser is coming back to the shop page.
  *
- * Kolejnosc jest odwrotna do intuicyjnej i to jest w niej najwazniejsze:
- * zamowienie powstaje PRZED przestawieniem statusu transakcji. Warunkowa
- * aktualizacja (`status: pending` -> `succeeded`) rozstrzyga, kto wygral;
- * przegrany kasuje swoje swiezo utworzone zamowienie, ktorego nikt jeszcze nie
- * widzial, i zwraca zamowienie zwyciezcy. Gdyby bylo odwrotnie (najpierw status,
- * potem zamowienie), awaria miedzy jednym a drugim zostawialaby transakcje
- * oplacona bez zamowienia i bez sciezki wyjscia - stan, z ktorego nie ma
- * automatycznego powrotu.
+ * The ordering is the reverse of the intuitive one, and that is the most
+ * important thing about it: the order is created BEFORE the transaction status
+ * is switched. A conditional update (`status: pending` -> `succeeded`) decides
+ * who won; the loser deletes its freshly created order, which nobody has seen
+ * yet, and returns the winner's order. Were it the other way round (status
+ * first, order second), a failure between the one and the other would leave a
+ * transaction paid with no order and no way out - a state with no automatic
+ * recovery.
  *
- * Czego to NIE gwarantuje. `payload.update` z `where` nie jest atomowym
- * compare-and-swap: Payload wykonuje `db.find`, a dopiero potem zapis po
- * dokumencie (`node_modules/payload/dist/collections/operations/update.js`).
- * Zostaje wiec waskie okno, w ktorym oba wywolania widza status `pending`
- * i oba uznaja sie za zwyciezce. Skutkiem jest osierocony dokument zamowienia,
- * do ktorego nic nie prowadzi - nie podwojne obciazenie platnika, bo platnosc
- * jest jedna. Domkniecie tego okna wymaga `payload.db.updateOne` z warunkiem,
- * co z kolei omija haki kolekcji, na ktorych sklepy potrafia polegac. Wybor
- * pada na haki; reszta jest opisana w README jako znane ograniczenie.
+ * What this does NOT guarantee. `payload.update` with a `where` is not an
+ * atomic compare-and-swap: Payload runs a `db.find` and only then writes per
+ * document (`node_modules/payload/dist/collections/operations/update.js`).
+ * That leaves a narrow window in which both calls see status `pending` and both
+ * consider themselves the winner. The result is an orphaned order document that
+ * nothing points to - not a double charge to the payer, because there is only
+ * one payment. Closing that window would require `payload.db.updateOne` with a
+ * condition, which in turn bypasses the collection hooks that shops can rely
+ * on. The choice falls on the hooks; the rest is described in the README as a
+ * known limitation.
  */
 export async function finalizeOrder(args: FinalizeArgs): Promise<FinalizeResult> {
   const {
@@ -84,10 +85,11 @@ export async function finalizeOrder(args: FinalizeArgs): Promise<FinalizeResult>
   }
 
   const customerID = idOf(transaction.customer)
-  // Adres zapisany na transakcji przy `initiate` ma pierwszenstwo. Adres
-  // z pozniejszego zadania (powrot przegladarki, powiadomienie) jest tylko
-  // uzupelnieniem, gdy transakcja go nie ma - inaczej ktos, kto zna cudzy
-  // identyfikator transakcji, przypisalby sobie zamowienie oplacone przez kogo innego.
+  // The address saved on the transaction at `initiate` takes precedence. An
+  // address from a later request (browser return, notification) only fills in
+  // when the transaction has none - otherwise someone who knows another
+  // person's transaction identifier could assign themselves an order paid for
+  // by somebody else.
   const email = transaction.customerEmail || customerEmail
 
   const order = (await payload.create({
@@ -121,8 +123,8 @@ export async function finalizeOrder(args: FinalizeArgs): Promise<FinalizeResult>
   const won = Array.isArray(claimed?.docs) && claimed.docs.length > 0
 
   if (!won) {
-    // Ktos inny domknal te transakcje w tej samej chwili. Kasujemy wlasne
-    // zamowienie, zanim ktokolwiek je zobaczy, i zwracamy to, ktore zostalo.
+    // Somebody else closed this transaction at the same moment. We delete our
+    // own order before anyone sees it and return the one that remained.
     try {
       await payload.delete({ id: order.id, collection: ordersSlug, req })
     } catch (error) {
@@ -168,7 +170,7 @@ export async function finalizeOrder(args: FinalizeArgs): Promise<FinalizeResult>
         req,
       })
     } catch (error) {
-      // Koszyk oznaczony jako kupiony to wygoda, nie warunek zamowienia.
+      // A cart marked as purchased is a convenience, not a condition of the order.
       payload.logger.error({
         err: error,
         msg: `Tpay: could not mark cart ${cartID} as purchased`,
@@ -180,9 +182,10 @@ export async function finalizeOrder(args: FinalizeArgs): Promise<FinalizeResult>
 }
 
 /**
- * Ustawia koncowy status transakcji, ktora nie konczy sie zamowieniem
- * (odmowa, wycofanie srodkow). Nigdy nie cofa transakcji juz udanej -
- * poza wycofaniem srodkow, ktore jest wlasnie zmiana po udanej platnosci.
+ * Sets the final status of a transaction that does not end in an order
+ * (refusal, chargeback). Never reverts a transaction that already succeeded -
+ * apart from a chargeback, which is precisely a change after a successful
+ * payment.
  */
 export async function markTransactionStatus(args: {
   req: PayloadRequest

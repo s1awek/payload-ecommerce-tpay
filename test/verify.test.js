@@ -11,7 +11,7 @@ import {
 } from '../dist/verify.js'
 
 const MERCHANT_ID = '123456'
-const SECURITY_CODE = 'tajny-kod-testowy'
+const SECURITY_CODE = 'secret-test-code'
 
 const notification = {
   id: MERCHANT_ID,
@@ -22,9 +22,9 @@ const notification = {
   tr_status: 'TRUE',
 }
 
-describe('suma kontrolna powiadomienia', () => {
-  it('liczy md5 wg wzoru z dokumentacji Tpay', () => {
-    // md5(merchantId + tr_id + kwota_2dp + tr_crc + kod)
+describe('notification checksum', () => {
+  it('computes md5 per the formula from Tpay documentation', () => {
+    // md5(merchantId + tr_id + amount_2dp + tr_crc + code)
     const expected = createHash('md5')
       .update(`${MERCHANT_ID}TR-ABC-12319.99transactions-1${SECURITY_CODE}`)
       .digest('hex')
@@ -35,7 +35,7 @@ describe('suma kontrolna powiadomienia', () => {
     )
   })
 
-  it('kwota jest formatowana do dwoch miejsc przed policzeniem sumy', () => {
+  it('the amount is formatted to two decimal places before computing the checksum', () => {
     const short = notificationChecksum(
       { ...notification, tr_amount: '19.9' },
       { merchantId: MERCHANT_ID, securityCode: SECURITY_CODE },
@@ -48,7 +48,7 @@ describe('suma kontrolna powiadomienia', () => {
     assert.equal(short, padded)
   })
 
-  it('znany-dobry przechodzi', () => {
+  it('known-good passes', () => {
     const md5sum = notificationChecksum(notification, {
       merchantId: MERCHANT_ID,
       securityCode: SECURITY_CODE,
@@ -63,7 +63,7 @@ describe('suma kontrolna powiadomienia', () => {
     )
   })
 
-  it('znany-zly odpada: podmieniona kwota, podmieniony numer, zly kod, brak sumy', () => {
+  it('known-bad is rejected: swapped amount, swapped number, wrong code, missing checksum', () => {
     const md5sum = notificationChecksum(notification, {
       merchantId: MERCHANT_ID,
       securityCode: SECURITY_CODE,
@@ -72,17 +72,17 @@ describe('suma kontrolna powiadomienia', () => {
     const args = { merchantId: MERCHANT_ID, securityCode: SECURITY_CODE }
 
     assert.equal(isChecksumValid({ ...notification, md5sum, tr_amount: '1.00' }, args), false)
-    assert.equal(isChecksumValid({ ...notification, md5sum, tr_id: 'TR-INNE' }, args), false)
+    assert.equal(isChecksumValid({ ...notification, md5sum, tr_id: 'TR-OTHER' }, args), false)
     assert.equal(isChecksumValid({ ...notification, md5sum, tr_crc: 'transactions-9' }, args), false)
     assert.equal(
-      isChecksumValid({ ...notification, md5sum }, { ...args, securityCode: 'zly-kod' }),
+      isChecksumValid({ ...notification, md5sum }, { ...args, securityCode: 'wrong-code' }),
       false,
     )
     assert.equal(isChecksumValid({ ...notification }, args), false)
-    assert.equal(isChecksumValid({ ...notification, md5sum: 'krotkie' }, args), false)
+    assert.equal(isChecksumValid({ ...notification, md5sum: 'short' }, args), false)
   })
 
-  it('suma zapisana wielkimi literami tez przechodzi', () => {
+  it('a checksum written in uppercase also passes', () => {
     const md5sum = notificationChecksum(notification, {
       merchantId: MERCHANT_ID,
       securityCode: SECURITY_CODE,
@@ -98,25 +98,25 @@ describe('suma kontrolna powiadomienia', () => {
   })
 })
 
-describe('parsowanie ciala powiadomienia', () => {
-  it('czyta formularz i rozkodowuje wartosci', () => {
+describe('parsing the notification body', () => {
+  it('reads the form and decodes values', () => {
     const parsed = parseNotificationBody(
-      'id=123456&tr_id=TR-ABC&tr_amount=19.99&tr_desc=Zam%C3%B3wienie+7&tr_status=TRUE',
+      'id=123456&tr_id=TR-ABC&tr_amount=19.99&tr_desc=Caf%C3%A9+order+7&tr_status=TRUE',
     )
 
     assert.equal(parsed.tr_id, 'TR-ABC')
-    assert.equal(parsed.tr_desc, 'Zamówienie 7')
+    assert.equal(parsed.tr_desc, 'Café order 7')
     assert.equal(parsed.tr_status, 'TRUE')
   })
 })
 
-describe('zrodla certyfikatu podpisu', () => {
-  it('listy hostow sa rozlaczne miedzy sandboksem a produkcja', () => {
+describe('sources of the signature certificate', () => {
+  it('the host lists are disjoint between sandbox and production', () => {
     assert.deepEqual(allowedX5uHostsFor(false), ['secure.tpay.com'])
     assert.deepEqual(allowedX5uHostsFor(true), ['secure.sandbox.tpay.com'])
   })
 
-  it('adres certyfikatu glownego zalezy od srodowiska', () => {
+  it('the root certificate address depends on the environment', () => {
     assert.equal(jwsRootCertificateUrl(false), 'https://secure.tpay.com/x509/tpay-jws-root.pem')
     assert.equal(
       jwsRootCertificateUrl(true),

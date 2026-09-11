@@ -1,15 +1,15 @@
 /**
- * Weryfikacja PRZECHWYCONEGO powiadomienia Tpay - offline, na pliku z dysku.
+ * Verification of a CAPTURED Tpay notification - offline, from a file on disk.
  *
- * Sens tego przebiegu: testy jednostkowe sprawdzaja nasza weryfikacje na powiadomieniach,
- * ktore sami zbudowalismy - a wiec na naszym wyobrazeniu o tym, co przysyla Tpay.
- * Tutaj wchodzi ich powiadomienie, ich suma md5 i ich podpis.
+ * The point of this run: the unit tests check our verification against notifications
+ * we built ourselves - i.e. against our own idea of what Tpay sends.
+ * Here their notification, their md5 checksum and their signature come in.
  *
- *   node --env-file=.env test/e2e/verify-capture.mjs <plik.body.txt>
+ *   node --env-file=.env test/e2e/verify-capture.mjs <file.body.txt>
  *
- * Kazda kontrola jest uruchamiana dwa razy: na materiale nietkniętym (ma przejsc)
- * i na materiale z podmieniona jedna wartoscia (ma odpasc). Kontrola, ktora nigdy
- * nie zglasza bledu, jest nieodroznialna od zepsutej.
+ * Each check is run twice: on untouched material (must pass) and on material
+ * with one value swapped (must fail). A check that never reports an error is
+ * indistinguishable from a broken one.
  */
 import { readFileSync } from 'node:fs'
 
@@ -24,7 +24,7 @@ import {
 
 const bodyPath = process.argv[2]
 if (!bodyPath) {
-  console.error('Podaj sciezke do pliku *.body.txt')
+  console.error('Provide the path to a *.body.txt file')
   process.exit(1)
 }
 const headersPath = bodyPath.replace(/\.body\.txt$/, '.headers.json')
@@ -36,89 +36,89 @@ const sandbox = process.env.TPAY_SANDBOX !== 'false'
 const merchantId = process.env.TPAY_MERCHANT_ID
 const securityCode = process.env.TPAY_SECURITY_CODE
 if (!merchantId || !securityCode) {
-  console.error('Brak TPAY_MERCHANT_ID albo TPAY_SECURITY_CODE')
+  console.error('Missing TPAY_MERCHANT_ID or TPAY_SECURITY_CODE')
   process.exit(1)
 }
 
 const n = parseNotificationBody(rawBody)
 
-console.log('=== przechwycone powiadomienie ===')
-console.log('plik:              ', bodyPath)
-console.log('dlugosc ciala:     ', rawBody.length, 'B')
-console.log('pola:              ', Object.keys(n).sort().join(', '))
-console.log('tr_id:             ', n.tr_id)
+console.log('=== captured notification ===')
+console.log('file:               ', bodyPath)
+console.log('body length:        ', rawBody.length, 'B')
+console.log('fields:             ', Object.keys(n).sort().join(', '))
+console.log('tr_id:              ', n.tr_id)
 console.log('tr_amount / tr_paid:', n.tr_amount, '/', n.tr_paid)
-console.log('tr_status:         ', n.tr_status)
-console.log('tr_crc (nasze id): ', n.tr_crc)
-console.log('test_mode:         ', n.test_mode)
-console.log('md5sum od Tpay:    ', n.md5sum)
+console.log('tr_status:          ', n.tr_status)
+console.log('tr_crc (our id):    ', n.tr_crc)
+console.log('test_mode:          ', n.test_mode)
+console.log('md5sum from Tpay:   ', n.md5sum)
 
-// --- warstwa 1: suma md5 -----------------------------------------------------
-const wyliczona = notificationChecksum(n, { merchantId, securityCode })
+// --- layer 1: md5 checksum ---------------------------------------------------
+const computed = notificationChecksum(n, { merchantId, securityCode })
 const md5Ok = isChecksumValid(n, { merchantId, securityCode })
-console.log('\n=== warstwa 1: suma md5 ===')
-console.log('wyliczona u nas:   ', wyliczona)
-console.log('werdykt:           ', md5Ok ? 'PRZESZLA' : 'ODPADLA')
+console.log('\n=== layer 1: md5 checksum ===')
+console.log('computed by us:    ', computed)
+console.log('verdict:           ', md5Ok ? 'PASSED' : 'FAILED')
 
-// kontrola znanym-zlym: ta sama suma po podmianie kwoty musi odpasc
-const podrobione = { ...n, tr_amount: String(Number(n.tr_amount ?? '0') + 1) }
-const md5Podrobione = isChecksumValid(podrobione, { merchantId, securityCode })
-console.log('kontrola (kwota +1):', md5Podrobione ? 'PRZESZLA - WADA, suma nie chroni kwoty' : 'odpadla, jak ma byc')
+// known-bad check: the same checksum after swapping the amount must fail
+const tampered = { ...n, tr_amount: String(Number(n.tr_amount ?? '0') + 1) }
+const md5Tampered = isChecksumValid(tampered, { merchantId, securityCode })
+console.log('control (amount +1):', md5Tampered ? 'PASSED - DEFECT, the checksum does not protect the amount' : 'failed, as expected')
 
-// --- warstwa 2: podpis JWS ---------------------------------------------------
+// --- layer 2: JWS signature ---------------------------------------------------
 const jwsHeader = headers['x-jws-signature'] ?? headers['X-JWS-Signature']
-console.log('\n=== warstwa 2: podpis JWS ===')
+console.log('\n=== layer 2: JWS signature ===')
 let jwsOk = null
-let jwsPodrobioneOdpadl = null
+let jwsTamperedFailed = null
 if (!jwsHeader) {
-  console.log('naglowek X-JWS-Signature: BRAK w przechwycie (Tpay go nie przyslal)')
+  console.log('X-JWS-Signature header: MISSING from the capture (Tpay did not send it)')
 } else {
   const rootUrl = jwsRootCertificateUrl(sandbox)
   const root = await fetch(rootUrl).then((r) => (r.ok ? r.text() : null)).catch(() => null)
-  console.log('certyfikat glowny: ', root ? `pobrany z ${rootUrl}` : `NIE POBRANY z ${rootUrl} - lancuch niesprawdzany`)
-  console.log('dozwolone hosty x5u:', allowedX5uHostsFor(sandbox).join(', '))
+  console.log('root certificate:  ', root ? `fetched from ${rootUrl}` : `NOT FETCHED from ${rootUrl} - chain unverified`)
+  console.log('allowed x5u hosts: ', allowedX5uHostsFor(sandbox).join(', '))
 
-  const wynik = await verifyJwsSignature({
+  const result = await verifyJwsSignature({
     allowedX5uHosts: allowedX5uHostsFor(sandbox),
     header: jwsHeader,
     rawBody,
     rootCertificate: root ?? undefined,
   })
-  jwsOk = wynik.ok
-  console.log('werdykt:           ', wynik.ok ? 'PRZESZEDL' : `ODPADL: ${wynik.reason}`)
+  jwsOk = result.ok
+  console.log('verdict:           ', result.ok ? 'PASSED' : `FAILED: ${result.reason}`)
 
-  // kontrola znanym-zlym: jeden znak wiecej w ciele musi wywrocic podpis
-  const wynikPodrobiony = await verifyJwsSignature({
+  // known-bad check: one extra character in the body must break the signature
+  const tamperedResult = await verifyJwsSignature({
     allowedX5uHosts: allowedX5uHostsFor(sandbox),
     header: jwsHeader,
     rawBody: rawBody + '&x=1',
     rootCertificate: root ?? undefined,
   })
-  jwsPodrobioneOdpadl = !wynikPodrobiony.ok
+  jwsTamperedFailed = !tamperedResult.ok
   console.log(
-    'kontrola (cialo +"&x=1"):',
-    wynikPodrobiony.ok ? 'PRZESZEDL - WADA, podpis nie chroni ciala' : `odpadl, jak ma byc (${wynikPodrobiony.reason})`,
+    'control (body +"&x=1"):',
+    tamperedResult.ok ? 'PASSED - DEFECT, the signature does not protect the body' : `failed, as expected (${tamperedResult.reason})`,
   )
 }
 
-// --- wynik -------------------------------------------------------------------
-const wady = []
-if (!md5Ok) wady.push('suma md5 nie zgadza sie z ta, ktora przyslal Tpay')
-if (md5Podrobione) wady.push('suma md5 przechodzi po podmianie kwoty - kontrola nie dziala')
-if (jwsHeader && jwsOk === false) wady.push('podpis JWS Tpay nie przechodzi naszej weryfikacji')
-if (jwsHeader && jwsPodrobioneOdpadl === false) wady.push('podpis JWS przechodzi po zmianie ciala - kontrola nie dziala')
+// --- result --------------------------------------------------------------------
+const defects = []
+if (!md5Ok) defects.push('the md5 checksum does not match the one Tpay sent')
+if (md5Tampered) defects.push('the md5 checksum passes after swapping the amount - the check does not work')
+if (jwsHeader && jwsOk === false) defects.push("Tpay's JWS signature does not pass our verification")
+if (jwsHeader && jwsTamperedFailed === false) defects.push('the JWS signature passes after changing the body - the check does not work')
 
-console.log('\n=== wynik ===')
-if (wady.length) {
-  wady.forEach((w) => console.log('WADA:', w))
+console.log('\n=== result ===')
+if (defects.length) {
+  defects.forEach((d) => console.log('DEFECT:', d))
   process.exit(1)
 }
-console.log('Suma md5: przeszla na materiale nietknietym, odpadla na podmienionej kwocie.')
+console.log('md5 checksum: passed on untouched material, failed on the swapped amount.')
 if (!jwsHeader) {
-  // Brak naglowka nie jest sukcesem warstwy 2 - to znaczy, ze jej nie zmierzono wcale.
-  console.log('Podpis JWS: NIEZMIERZONY - w przechwycie nie bylo naglowka X-JWS-Signature.')
-  console.log('\nWYNIK CZESCIOWY: zweryfikowana jedna warstwa z dwoch.')
+  // A missing header is not a success for layer 2 - it means it was not measured at all.
+  console.log('JWS signature: NOT MEASURED - the capture had no X-JWS-Signature header.')
+  console.log('\nPARTIAL RESULT: one layer out of two verified.')
   process.exit(2)
 }
-console.log('Podpis JWS: przeszedl na ciele nietknietym, odpadl po dopisaniu jednego pola.')
-console.log('\nWYNIK PELNY: obie warstwy zweryfikowane na materiale wystawionym przez Tpay.')
+console.log('JWS signature: passed on the untouched body, failed after appending one field.')
+console.log('\nFULL RESULT: both layers verified on material issued by Tpay.')

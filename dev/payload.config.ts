@@ -1,13 +1,12 @@
 /**
- * Minimalny gospodarz deweloperski: prawdziwy Payload + wtyczka e-commerce
- * + nasz adapter Tpay. Bez Next.js - panel administracyjny nie jest tu do
- * niczego potrzebny, bo przebieg idzie przez API lokalne i przez endpointy
- * zarejestrowane przez wtyczke.
+ * Minimal development host: real Payload + the e-commerce plugin + our Tpay
+ * adapter. No Next.js - the admin panel is not needed here, because the run
+ * goes through the local API and through the endpoints the plugin registers.
  *
- * Powod istnienia tego katalogu: testy jednostkowe adaptera mierzyly nasz kod
- * na atrapie Payloada. To NIE jest to samo co zapis zamowienia do prawdziwej
- * kolekcji utworzonej przez wtyczke. Roznice miedzy atrapa a rzeczywistoscia
- * sa dokladnie tym, czego atrapa nie moze pokazac.
+ * Reason this directory exists: the adapter's unit tests measured our code
+ * against a Payload stub. That is NOT the same as writing an order to the
+ * real collection the plugin creates. The differences between a stub and
+ * reality are exactly what a stub cannot show.
  */
 import { sqliteAdapter } from '@payloadcms/db-sqlite'
 import { ecommercePlugin } from '@payloadcms/plugin-ecommerce'
@@ -16,16 +15,16 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildConfig } from 'payload'
 
-// Adapter bierzemy z katalogu nadrzednego, wprost z dist. Jest tam czysty JS
-// bez runtime'owych importow z payload ani z wtyczki (zmierzone: grep po dist
-// nie znajduje ani jednego), wiec nie wymaga instalacji jako paczka.
+// The adapter is taken from the parent directory, straight from dist. It is
+// plain JS with no runtime imports from payload or from the plugin (measured:
+// grep over dist finds none), so it does not need to be installed as a package.
 import { PLN, tpayAdapter } from '../dist/index.js'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
-const adresPubliczny = (process.env.NEXT_PUBLIC_SERVER_URL || '').replace(/\/+$/, '')
+const publicAddress = (process.env.NEXT_PUBLIC_SERVER_URL || '').replace(/\/+$/, '')
 
-const jestAdministratorem = ({ req }: { req: { user?: unknown } }) => Boolean(req.user)
+const isAdministrator = ({ req }: { req: { user?: unknown } }) => Boolean(req.user)
 
 export default buildConfig({
   admin: { disable: true },
@@ -33,7 +32,7 @@ export default buildConfig({
     {
       slug: 'users',
       auth: true,
-      fields: [{ name: 'rola', type: 'select', defaultValue: 'klient', options: ['admin', 'klient'] }],
+      fields: [{ name: 'role', type: 'select', defaultValue: 'customer', options: ['admin', 'customer'] }],
     },
   ],
   db: sqliteAdapter({
@@ -44,9 +43,9 @@ export default buildConfig({
   plugins: [
     ecommercePlugin({
       access: {
-        adminOnlyFieldAccess: jestAdministratorem,
+        adminOnlyFieldAccess: isAdministrator,
         adminOrPublishedStatus: () => true,
-        isAdmin: jestAdministratorem,
+        isAdmin: isAdministrator,
         isDocumentOwner: () => true,
         publicAccess: () => true,
       },
@@ -55,30 +54,33 @@ export default buildConfig({
       payments: {
         paymentMethods: [
           tpayAdapter({
-            // Bez tych dwoch adresow Tpay odsyla platnika tam, gdzie wskazuje panel
-            // sprzedawcy - czyli poza nasz sklep. Sciezka przegladarki (`confirm-order`)
-            // nie odpala sie wtedy wcale, a to WLASNIE ona zdejmuje stan magazynowy.
-            payerErrorUrl: adresPubliczny ? `${adresPubliczny}/blad` : undefined,
-            payerSuccessUrl: adresPubliczny ? `${adresPubliczny}/powrot` : undefined,
+            // Without these two addresses Tpay sends the payer back wherever the
+            // merchant panel points - that is, outside our shop. The browser path
+            // (`confirm-order`) never fires then, and that is EXACTLY what
+            // decrements stock.
+            payerErrorUrl: publicAddress ? `${publicAddress}/error` : undefined,
+            payerSuccessUrl: publicAddress ? `${publicAddress}/return` : undefined,
             sandbox: true,
-            // Domyslnie adapter WYMAGA podpisu JWS (piaskownica Tpay tez go wysyla).
-            // Pokretlo tylko dla `kontrola-toru.mjs`: bez klucza Tpay nie da sie
-            // wyprodukowac znanego-dobrego podpisu, wiec warstwe md5 mierzy sie
-            // osobno, na gospodarzu uruchomionym z TPAY_VERIFY_JWS=false.
+            // By default the adapter REQUIRES a JWS signature (the Tpay sandbox
+            // sends one too). The knob exists only for `check-pipeline.mjs`:
+            // without Tpay's private key a known-good signature cannot be
+            // produced, so the md5 layer alone is measured separately, on a host
+            // started with TPAY_VERIFY_JWS=false.
             verifyJws: process.env.TPAY_VERIFY_JWS !== 'false',
           }),
         ],
       },
-      // `products` MUSI byc podane jawnie, mimo ze dokumentacja typu mowi
-      // "Defaults to true". W 3.88.0 `sanitizePluginConfig` ustawia domyslne
-      // wartosci dla customers, addresses, currencies, inventory, carts, orders,
-      // transactions i payments, ale dla products robi tylko `if (config.products)`.
-      // Pominiecie pola nie wylacza produktow po cichu - wywraca CALA inicjalizacje
-      // Payloada bledem `InvalidFieldRelationship: ... has invalid relationship
-      // 'products'`, bo koszyk i tak trzyma relacje do nieistniejacej kolekcji.
-      // Domyslna kolekcja produktow wtyczki nie ma zadnej nazwy (kolumny: cena, stan,
-      // warianty, status) - sklep demo potrzebuje tytulu, wiec dokladamy jedno pole
-      // tak, jak zrobi to kazdy prawdziwy sklep: przez productsCollectionOverride.
+      // `products` MUST be given explicitly, even though the type's documentation
+      // says "Defaults to true". In 3.88.0 `sanitizePluginConfig` sets defaults for
+      // customers, addresses, currencies, inventory, carts, orders, transactions and
+      // payments, but for products it only does `if (config.products)`. Omitting the
+      // field does not quietly disable products - it aborts Payload's ENTIRE
+      // initialisation with `InvalidFieldRelationship: ... has invalid relationship
+      // 'products'`, because the cart still holds a relationship to the missing
+      // collection. The plugin's default products collection has no name field at
+      // all (columns: price, stock, variants, status) - the demo shop needs a title,
+      // so we add one field the way any real shop would: through
+      // productsCollectionOverride.
       products: {
         productsCollectionOverride: ({ defaultCollection }) => ({
           ...defaultCollection,
@@ -87,6 +89,6 @@ export default buildConfig({
       },
     }),
   ],
-  secret: process.env.PAYLOAD_SECRET || 'gospodarz-deweloperski-nie-produkcja',
+  secret: process.env.PAYLOAD_SECRET || 'development-host-not-production',
   typescript: { outputFile: path.resolve(dirname, 'payload-types.ts') },
 })

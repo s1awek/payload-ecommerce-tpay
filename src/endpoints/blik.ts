@@ -15,17 +15,19 @@ import type { TpayAdapterArgs } from '../types.js'
 
 type AnyDoc = Record<string, any>
 
-/** Statusy Tpay, po ktorych platnosc juz nie dojdzie do skutku. */
+/** Tpay statuses after which the payment will no longer go through. */
 const FAILED_STATUSES = new Set(['declined', 'error', 'expired', 'rejected'])
 
 /**
- * Wyciaga kod bledu z ostatniej proby zaplaty.
+ * Extracts the error code from the last payment attempt.
  *
- * Odrzucony kod BLIK NIE przestawia statusu transakcji - zmierzone 07.09.2026
- * na piaskownicy, gdzie kod `000000` zostawil transakcje w `pending`, a jedynym
- * sladem odmowy bylo `payments.attempts[].paymentErrorCode` rowne `63`.
- * Bez zajrzenia tutaj kasa nie odroznilaby „czekamy na potwierdzenie w banku"
- * od „kod odrzucony, poproś o nowy", i kazalaby kupujacemu czekac w nieskonczonosc.
+ * A rejected BLIK code does NOT change the transaction status - measured
+ * 07.09.2026 on the sandbox, where the code `000000` left the transaction in
+ * `pending` and the only trace of the refusal was
+ * `payments.attempts[].paymentErrorCode` equal to `63`.
+ * Without looking here, the checkout could not tell "waiting for confirmation
+ * in the bank" from "code rejected, ask for a new one", and would have the
+ * buyer waiting forever.
  */
 const lastAttemptError = (remote: AnyDoc | undefined): null | string => {
   const attempts = (remote?.payments as AnyDoc | undefined)?.attempts
@@ -53,9 +55,9 @@ const jsonResponse = (body: unknown, status = 200): Response =>
   })
 
 /**
- * Cialo zadania czytamy raz i odpornie na to, czy warstwa wyzej zdazyla je juz
- * rozpakowac do `req.data` (tak robi wtyczka e-commerce w swoich wlasnych
- * punktach), czy nie (nasze punkty stoja obok niej).
+ * We read the request body once, and robustly with respect to whether the layer
+ * above has already unpacked it into `req.data` (which is what the ecommerce
+ * plugin does in its own endpoints) or not (our endpoints stand next to it).
  */
 const readBody = async (req: PayloadRequest): Promise<AnyDoc> => {
   if (req.data && typeof req.data === 'object') {
@@ -73,7 +75,7 @@ const readBody = async (req: PayloadRequest): Promise<AnyDoc> => {
   return {}
 }
 
-/** Wspolny wstep obu punktow: znajdz platnosc i sprawdz, czy wolno jej dotknac. */
+/** Shared preamble of both endpoints: find the payment and check it may be touched. */
 const loadTransaction = async (args: {
   body: AnyDoc
   cartsSlug: string
@@ -103,8 +105,8 @@ const loadTransaction = async (args: {
   const transaction = results.docs[0] as AnyDoc | undefined
 
   if (!transaction) {
-    // Ten sam komunikat i ten sam kod co przy braku uprawnien, zeby odpowiedz
-    // nie zdradzala, ktore identyfikatory istnieja.
+    // The same message and the same code as for missing permission, so that
+    // the response does not reveal which identifiers exist.
     throw new BlikError('You are not allowed to access this payment.', 403)
   }
 
@@ -114,14 +116,14 @@ const loadTransaction = async (args: {
 }
 
 /**
- * Sprowadza stan platnosci po stronie Tpay do trzech odpowiedzi, ktore kasa
- * sklepu potrafi pokazac kupujacemu, i domyka zamowienie, gdy jest zaplacone.
+ * Reduces the payment state on Tpay's side to three answers the shop checkout
+ * can show the buyer, and closes the order once it is paid.
  *
- * Zamowienie domykamy tym samym `finalizeOrder`, ktorym robi to powiadomienie
- * serwer-serwer, a NIE punktem `confirm-order` wtyczki. Powod jest zmierzony:
- * handler wtyczki zdejmuje stan magazynowy przy kazdym wywolaniu, bez bramki
- * idempotencji, wiec odpytywanie go w petli - a odpytywanie jest w BLIK-u 0
- * konieczne - zabieralo by kolejna sztuke z magazynu przy kazdym sprawdzeniu.
+ * We close the order with the same `finalizeOrder` the server-to-server
+ * notification uses, and NOT with the plugin's `confirm-order` endpoint. The
+ * reason is measured: the plugin's handler decrements stock on every call, with
+ * no idempotency gate, so polling it in a loop - and polling is unavoidable in
+ * BLIK 0 - would take another item off the shelf on every check.
  */
 const resolveState = async (args: {
   props: BlikProps
@@ -146,7 +148,8 @@ const resolveState = async (args: {
   const remoteStatus = String(remote?.status ?? 'unknown')
 
   if (remoteStatus === TPAY_STATUS_PAID) {
-    // Ta sama bramka co w `confirm-order`: oplacona ma byc TA transakcja.
+    // The same gate as in `confirm-order`: THIS transaction is the one that
+    // has to be paid.
     assertRemoteMatchesTransaction({ remote, transaction })
 
     const finished = await finalizeOrder({
@@ -186,8 +189,8 @@ const resolveState = async (args: {
   const attemptError = lastAttemptError(remote as AnyDoc)
 
   if (attemptError) {
-    // Transakcji nie ruszamy: zostaje `pending`, bo kupujacy moze podac
-    // kolejny kod do tej samej platnosci.
+    // We leave the transaction alone: it stays `pending`, because the buyer
+    // can supply another code for the same payment.
     return {
       body: {
         message: 'The BLIK code was rejected. Ask the buyer for a new one.',
@@ -222,17 +225,20 @@ const errorResponse = (req: PayloadRequest, error: unknown, msg: string): Respon
     return jsonResponse({ message: 'The payment does not match this transaction.' }, error.status)
   }
 
-  // Szczegoly (w tym tresc `TpayApiError` z metoda i sciezka API) zostaja
-  // w logu. Na zewnatrz idzie staly komunikat, tak jak z handlera wtyczki.
+  // Details (including the text of `TpayApiError` with the API method and
+  // path) stay in the log. What goes out is a fixed message, just as from the
+  // plugin's handler.
   return jsonResponse({ message: 'Payment could not be processed.' }, 500)
 }
 
 /**
- * Przyjmuje kod BLIK wpisany w kasie sklepu i dosyla go do istniejacej platnosci.
+ * Accepts the BLIK code typed at the shop checkout and sends it to the existing
+ * payment.
  *
- * Odpowiedz NIGDY nie oglasza zaplaty, nawet gdy Tpay odpowie `success`:
- * zmierzone 07.09.2026, kod `abcdef` przeszedl tam jako `success`/`pending`.
- * Rozstrzyga dopiero status transakcji, o ktory kasa pyta osobno.
+ * The response NEVER announces payment, even when Tpay answers `success`:
+ * measured 07.09.2026, the code `abcdef` went through there as
+ * `success`/`pending`. Only the transaction status, which the checkout asks for
+ * separately, decides.
  */
 export const blikEndpoint = (props: BlikProps): Endpoint => {
   const handler = async (req: PayloadRequest): Promise<Response> => {
@@ -280,7 +286,7 @@ export const blikEndpoint = (props: BlikProps): Endpoint => {
   }
 }
 
-/** Zwraca aktualny stan platnosci, zeby kasa mogla odpytywac po wyslaniu kodu. */
+/** Returns the current payment state, so the checkout can poll after sending the code. */
 export const blikStatusEndpoint = (props: BlikProps): Endpoint => {
   const handler = async (req: PayloadRequest): Promise<Response> => {
     const { cartsSlug = 'carts', transactionsSlug = 'transactions' } = props

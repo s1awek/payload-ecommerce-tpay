@@ -7,9 +7,10 @@ import type { TpayAdapterArgs } from './types.js'
 type AnyDoc = Record<string, any>
 
 /**
- * Tpay rozlicza w walutach dwucyfrowych (PLN, EUR, USD, GBP), a wtyczka
- * e-commerce trzyma kwoty w jednostkach podrzednych. Stala jest tu jawna,
- * zeby przy dokladaniu waluty o innej liczbie miejsc bylo widac, gdzie zajrzec.
+ * Tpay settles in two-decimal currencies (PLN, EUR, USD, GBP), and the
+ * ecommerce plugin keeps amounts in minor units. The constant is explicit here
+ * so that, when a currency with a different number of decimal places is added,
+ * it is clear where to look.
  */
 const CURRENCY_DECIMALS = 2
 
@@ -34,7 +35,7 @@ export const buildPayer = (args: {
   }
 }
 
-/** Splaszcza pozycje koszyka do postaci zapisywanej na transakcji i zamowieniu. */
+/** Flattens cart items into the shape stored on the transaction and the order. */
 export const flattenCartItems = (items: AnyDoc[]): AnyDoc[] =>
   items.map((item) => {
     const productID = typeof item.product === 'object' ? item.product?.id : item.product
@@ -102,10 +103,10 @@ export const initiatePayment =
 
     const items = flattenCartItems(cart.items)
 
-    // Dokument transakcji powstaje PRZED zadaniem do Tpay, zeby powiadomienie
-    // mialo w co trafic nawet wtedy, gdy zapis identyfikatora Tpay sie nie uda.
-    // Jego identyfikator jedzie do Tpay jako `hiddenDescription` i wraca
-    // w powiadomieniu jako `tr_crc`.
+    // The transaction document is created BEFORE the request to Tpay, so that
+    // the notification has something to land on even when writing the Tpay
+    // identifier fails. Its identifier travels to Tpay as `hiddenDescription`
+    // and comes back in the notification as `tr_crc`.
     const transaction = (await payload.create({
       collection: transactionsSlug,
       data: {
@@ -173,9 +174,9 @@ export const initiatePayment =
         transactionID: transaction.id,
       }
     } catch (error) {
-      // Transakcja bez odpowiednika w Tpay nigdy nie zostanie oplacona.
-      // Zostawienie jej w stanie `pending` zasmiecaloby panel pozycjami,
-      // ktore czekaja na powiadomienie, ktore nie ma prawa przyjsc.
+      // A transaction with no counterpart in Tpay will never be paid. Leaving
+      // it in `pending` would litter the panel with entries waiting for a
+      // notification that cannot arrive.
       try {
         await payload.update({
           id: transaction.id,

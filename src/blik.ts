@@ -3,16 +3,16 @@ import type { PayloadRequest } from 'payload'
 type AnyDoc = Record<string, any>
 
 /**
- * Identyfikator kanalu BLIK w Tpay. Zmierzone 07.09.2026 odczytem
- * `GET /transactions/channels` na piaskownicy: kanal `id: "64"`, grupa `id: "150"`,
+ * Tpay's BLIK channel identifier. Measured 07.09.2026 by reading
+ * `GET /transactions/channels` on the sandbox: channel `id: "64"`, group `id: "150"`,
  * `instantRedirection: false`.
  */
 export const BLIK_CHANNEL_ID = 64
 
-/** Tpay przyjmuje kod BLIK wylacznie jako metode pay-by-link z kanalem 64. */
+/** Tpay accepts a BLIK code only as a pay-by-link method with channel 64. */
 export const BLIK_METHOD = 'pay_by_link'
 
-/** Kod BLIK ma dokladnie tyle cyfr. */
+/** A BLIK code has exactly this many digits. */
 export const BLIK_TOKEN_LENGTH = 6
 
 export class BlikError extends Error {
@@ -26,16 +26,16 @@ export class BlikError extends Error {
 }
 
 /**
- * Kupujacy wpisuje kod z aplikacji banku, wiec bywa w nim spacja albo myslnik.
- * Zdejmujemy wszystko poza cyframi, zanim cokolwiek sprawdzimy.
+ * The buyer types the code out of their banking app, so it sometimes contains a
+ * space or a hyphen. We strip everything but digits before checking anything.
  */
 export const normalizeBlikToken = (raw: unknown): string =>
   typeof raw === 'string' || typeof raw === 'number' ? String(raw).replace(/\D/g, '') : ''
 
 /**
- * Dlugosc sprawdzamy u siebie, a nie dopiero po odpowiedzi Tpay, bo kod BLIK
- * jest jednorazowy i wazny okolo dwoch minut: kazde niepotrzebne zadanie zjada
- * czas, ktory kupujacy ma na potwierdzenie w aplikacji.
+ * We check the length here rather than waiting for Tpay's response, because a
+ * BLIK code is single-use and valid for about two minutes: every needless
+ * request eats into the time the buyer has to confirm it in the app.
  */
 export const assertBlikToken = (raw: unknown): string => {
   const token = normalizeBlikToken(raw)
@@ -52,13 +52,14 @@ export const assertBlikToken = (raw: unknown): string => {
 }
 
 /**
- * Rozstrzyga, czy zadanie ma prawo dotknac tej platnosci.
+ * Decides whether a request is allowed to touch this payment.
  *
- * Sam identyfikator transakcji NIE wystarcza. Jest przewidywalny na tyle, ze
- * bez tego sprawdzenia obcy moglby odpytywac stan cudzych platnosci, a przy
- * okazji wysylac do nich wlasne kody. Uznajemy dwa dowody, te same, na ktorych
- * stoi reszta wtyczki e-commerce: zalogowanego wlasciciela transakcji oraz
- * sekret koszyka, ktory zna wylacznie przegladarka, ktora ten koszyk zalozyla.
+ * The transaction identifier alone is NOT enough. It is predictable enough that
+ * without this check a stranger could poll the state of other people's payments
+ * and, while at it, send their own codes to them. We accept two proofs, the same
+ * ones the rest of the ecommerce plugin stands on: the logged-in owner of the
+ * transaction, and the cart secret, known only to the browser that created that
+ * cart.
  */
 export const assertTransactionAccess = async (args: {
   cartsSlug: string
@@ -87,8 +88,8 @@ export const assertTransactionAccess = async (args: {
       select: { secret: true },
     })) as AnyDoc | undefined
 
-    // Porownanie o stalym czasie nie jest tu potrzebne: sekret jest losowy
-    // i dlugi, a kazda proba wymaga osobnego zadania sieciowego.
+    // A constant-time comparison is not needed here: the secret is random and
+    // long, and every attempt requires a separate network request.
     if (cart?.secret && String(cart.secret) === secret) {
       return
     }

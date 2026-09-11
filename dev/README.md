@@ -15,7 +15,7 @@ generation. That is what this host is for.
 pnpm install                       # see pnpm-workspace.yaml for the build-script gate
 export $(grep -v '^#' ../.env | xargs)   # TPAY_CLIENT_ID, TPAY_CLIENT_SECRET, TPAY_MERCHANT_ID, TPAY_SECURITY_CODE
 export NEXT_PUBLIC_SERVER_URL=https://<a public tunnel to 127.0.0.1:8099>
-node --import tsx serwer.mts
+node --import tsx server.mts
 ```
 
 `NEXT_PUBLIC_SERVER_URL` must be reachable from the internet, because Tpay delivers the
@@ -26,14 +26,14 @@ tunnel works; `cloudflared tunnel --url http://127.0.0.1:8099` is what these scr
 
 | Script | What it does |
 |---|---|
-| `serwer.mts` | Translates `node:http` requests into `Request`, builds a `PayloadRequest` with `createPayloadRequest` (a public export of `payload`), and dispatches to the endpoints the plugin and the adapter registered. Also serves `/powrot`, standing in for a shop's checkout return page. |
-| `kontrola-toru.mjs` | Instrument check. Run it **before** waiting for a real notification. |
-| `zasiew-i-initiate.mts` | Seeds a product and a cart, then starts a payment through the live `initiate` endpoint and prints the payment URL. |
+| `server.mts` | Translates `node:http` requests into `Request`, builds a `PayloadRequest` with `createPayloadRequest` (a public export of `payload`), and dispatches to the endpoints the plugin and the adapter registered. Also serves `/return`, standing in for a shop's checkout return page. |
+| `check-pipeline.mjs` | Instrument check. Run it **before** waiting for a real notification. |
+| `seed-and-initiate.mts` | Seeds a product and a cart, then starts a payment through the live `initiate` endpoint and prints the payment URL. |
 
 ## Check the instrument before you trust silence
 
 ```bash
-node kontrola-toru.mjs https://your-tunnel.example
+node check-pipeline.mjs https://your-tunnel.example
 ```
 
 It sends two requests to the notification endpoint through the public address:
@@ -52,7 +52,7 @@ script has no Tpay private key, so an unsigned body with a correct md5 is reject
 forged one, and the script then only proves that both requests reached the handler through the
 tunnel (the literal `FALSE`, rather than a tunnel error page or a 404). The positive proof of the
 whole pipeline is a real, signed sandbox notification: after a BLIK payment the host log shows
-`POWIADOMIENIE tr_id=... X-JWS-Signature: jest` followed by `-> 200 TRUE`. To measure the md5 layer
+`NOTIFICATION tr_id=... X-JWS-Signature: present` followed by `-> 200 TRUE`. To measure the md5 layer
 on its own, start the host with `TPAY_VERIFY_JWS=false` and run the check with the same variable;
 that switch exists only in this host's `payload.config.ts`, not in the adapter.
 
@@ -74,17 +74,17 @@ missing these two settings takes payments and never adjusts inventory.
 
 ## The BLIK level 0 run
 
-`blik-przebieg.mts` seeds a product and a guest cart, calls `initiate`, sends a six digit code to
+`blik-run.mts` seeds a product and a guest cart, calls `initiate`, sends a six digit code to
 `/payments/tpay/blik` and then polls `/payments/tpay/blik-status` until the payment stops being
 pending. It prints the database state afterwards. `BLIK_TOKEN` picks the code, which is how the
 same script measures both directions:
 
 ```bash
-BLIK_TOKEN=777123 tsx blik-przebieg.mts   # accepted: pending, then paid, one order
-BLIK_TOKEN=000000 tsx blik-przebieg.mts   # refused: rejected, error 63, payment left open
+BLIK_TOKEN=777123 tsx blik-run.mts   # accepted: pending, then paid, one order
+BLIK_TOKEN=000000 tsx blik-run.mts   # refused: rejected, error 63, payment left open
 ```
 
-`blik-drugi-kod.mts` takes `TX_ID` of a payment that was refused and sends a good code to that same
+`blik-second-code.mts` takes `TX_ID` of a payment that was refused and sends a good code to that same
 payment, which is the case a checkout has to survive. It counts documents before and after, because
 "the buyer retried" must not mean "a second transaction and a second order appeared".
 
@@ -106,22 +106,22 @@ and never touch Tpay; the package README says the same in the configure section.
 
 ## The click-through shop
 
-`sklep.mts` serves the same Payload instance as `serwer.mts`, plus one HTML page (`sklep.html`):
+`shop.mts` serves the same Payload instance as `server.mts`, plus one HTML page (`shop.html`):
 a catalogue of three demo products, a cart, and a checkout with a six digit BLIK field next to a
-"pay on the Tpay page" button. Run it **instead of** `serwer.mts`, with the same environment
+"pay on the Tpay page" button. Run it **instead of** `server.mts`, with the same environment
 variables; both listen on 8099.
 
 ```bash
-node --import tsx sklep.mts          # then open http://127.0.0.1:8099/
+node --import tsx shop.mts          # then open http://127.0.0.1:8099/
 ```
 
 Everything the page does beyond forwarding `/api/*` is shop logic, and deliberately the logic the
 package README says a shop must write itself: it remembers the transaction id across the redirect,
 calls `confirm-order` at most once per transaction (a reload of the return page is refused, because
 the plugin decrements stock on every call), and after a BLIK payment decrements stock once itself
-(`/sklep/zdejmij-stan`), since the BLIK path never reaches the plugin's decrement. The right hand
+(`/shop/decrement-stock`), since the BLIK path never reaches the plugin's decrement. The right hand
 panel shows what happened in the database after each step, read through the local API; that read
-(`POST /sklep/stan`) and the stock decrement both require the cart `secret`, and answer an unknown
+(`POST /shop/state`) and the stock decrement both require the cart `secret`, and answer an unknown
 transaction and a wrong secret identically, so a browser cannot enumerate other people's payments.
 Prices and quantities are taken from the server, never from the page. The process log records a
 notification's `tr_id`, status and whether it was signed, never the body: the body carries the md5

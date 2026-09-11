@@ -9,16 +9,16 @@ import { before, describe, it } from 'node:test'
 import { verifyJwsSignature } from '../dist/verify.js'
 
 /**
- * Certyfikaty na potrzeby testu generujemy tutaj, zamiast trzymac je w repo:
- * klucz prywatny w repozytorium zapala skanery sekretow i predzej czy pozniej
- * ktos wezmie go za prawdziwy.
+ * We generate certificates for the test here, instead of keeping them in the repo:
+ * a private key in the repository sets off secret scanners, and sooner or later
+ * someone will mistake it for a real one.
  */
 const openssl = (args, cwd) => {
   const result = spawnSync('openssl', args, { cwd, encoding: 'utf8' })
 
   if (result.status !== 0) {
     throw new Error(
-      `openssl ${args.join(' ')} failed: ${result.stderr || result.stdout || 'brak wyjscia'}`,
+      `openssl ${args.join(' ')} failed: ${result.stderr || result.stdout || 'no output'}`,
     )
   }
 
@@ -35,9 +35,9 @@ let rogueKey
 before(() => {
   const probe = spawnSync('openssl', ['version'], { encoding: 'utf8' })
 
-  // Pominiecie testu podpisu byloby gorsze niz jego brak: suita swiecilaby
-  // na zielono, nie zmierzywszy warstwy, ktora chroni pieniadze.
-  assert.equal(probe.status, 0, 'test wymaga dostepnego polecenia `openssl`')
+  // Skipping the signature test would be worse than not having it: the suite
+  // would shine green without having measured the layer that protects the money.
+  assert.equal(probe.status, 0, 'test requires the `openssl` command to be available')
 
   dir = mkdtempSync(join(tmpdir(), 'tpay-jws-'))
 
@@ -68,8 +68,8 @@ const X5U = 'https://secure.tpay.com/x509/notifications-jws.pem'
 
 const certs = (pem) => async () => pem
 
-describe('podpis JWS powiadomienia', () => {
-  it('znany-dobry: podpis nad tym cialem, certyfikat z wlasciwego hosta, lancuch do korzenia', async () => {
+describe('JWS signature of the notification', () => {
+  it('known-good: signature over this body, certificate from the right host, chain to the root', async () => {
     const result = await verifyJwsSignature({
       fetchCertificate: certs(leafPem),
       header: sign(BODY, leafKey, X5U),
@@ -80,7 +80,7 @@ describe('podpis JWS powiadomienia', () => {
     assert.deepEqual(result, { ok: true })
   })
 
-  it('znany-zly: cialo podmienione po podpisaniu', async () => {
+  it('known-bad: body swapped after signing', async () => {
     const header = sign(BODY, leafKey, X5U)
     const result = await verifyJwsSignature({
       fetchCertificate: certs(leafPem),
@@ -93,7 +93,7 @@ describe('podpis JWS powiadomienia', () => {
     assert.match(String(result.reason), /does not match/)
   })
 
-  it('znany-zly: certyfikat spoza dozwolonego hosta nie jest nawet pobierany', async () => {
+  it('known-bad: a certificate from outside the allowed host is not even fetched', async () => {
     let fetched = false
 
     const result = await verifyJwsSignature({
@@ -102,17 +102,17 @@ describe('podpis JWS powiadomienia', () => {
 
         return roguePem
       },
-      header: sign(BODY, rogueKey, 'https://napastnik.example/moj-certyfikat.pem'),
+      header: sign(BODY, rogueKey, 'https://attacker.example/my-certificate.pem'),
       rawBody: BODY,
       rootCertificate: rootPem,
     })
 
     assert.equal(result.ok, false)
     assert.match(String(result.reason), /not allowed/)
-    assert.equal(fetched, false, 'adres spoza listy nie moze wywolac zadania wychodzacego')
+    assert.equal(fetched, false, 'an address outside the list must not trigger an outgoing request')
   })
 
-  it('znany-zly: certyfikat z wlasciwego hosta, ale spoza lancucha Tpay', async () => {
+  it('known-bad: certificate from the right host, but outside the Tpay chain', async () => {
     const result = await verifyJwsSignature({
       fetchCertificate: certs(roguePem),
       header: sign(BODY, rogueKey, X5U),
@@ -124,10 +124,10 @@ describe('podpis JWS powiadomienia', () => {
     assert.match(String(result.reason), /not issued by the configured root/)
   })
 
-  it('znany-zly: naglowek bez podpisu, z doklejonym ladunkiem, albo z innym algorytmem', async () => {
+  it('known-bad: header without a signature, with an attached payload, or with a different algorithm', async () => {
     const malformed = await verifyJwsSignature({
       fetchCertificate: certs(leafPem),
-      header: 'nie-jest-jws',
+      header: 'not-a-jws',
       rawBody: BODY,
     })
     assert.equal(malformed.ok, false)
@@ -150,7 +150,7 @@ describe('podpis JWS powiadomienia', () => {
     assert.match(String(downgraded.reason), /Unsupported JWS algorithm/)
   })
 
-  it('bez podanego korzenia sprawdzany jest sam podpis - i nadal odrzuca cudzy klucz', async () => {
+  it("without a given root only the signature itself is checked - and it still rejects someone else's key", async () => {
     const ok = await verifyJwsSignature({
       fetchCertificate: certs(leafPem),
       header: sign(BODY, leafKey, X5U),

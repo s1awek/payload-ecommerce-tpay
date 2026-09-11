@@ -13,14 +13,15 @@ import {
 
 type AnyDoc = Record<string, any>
 
-/** Statusy powiadomienia oznaczajace zaksiegowana platnosc. */
+/** Notification statuses meaning a settled payment. */
 const PAID_STATUSES = new Set(['PAID', 'TRUE'])
-/** Wycofanie srodkow po udanej platnosci. */
+/** Chargeback after a successful payment. */
 const CHARGEBACK_STATUS = 'CHARGEBACK'
 
 /**
- * Tpay uznaje powiadomienie za dostarczone dopiero po odpowiedzi o tresci `TRUE`.
- * Kazda inna odpowiedz (takze pusta z kodem 200) powoduje ponowienia.
+ * Tpay considers a notification delivered only after a response whose body is
+ * `TRUE`. Any other response (including an empty one with code 200) causes
+ * retries.
  */
 const okResponse = (): Response =>
   new Response('TRUE', { headers: { 'Content-Type': 'text/plain' }, status: 200 })
@@ -40,16 +41,18 @@ export const notificationsEndpoint = (
       sandbox = false,
       securityCode,
       transactionsSlug = 'transactions',
-      // Domyslnie WLACZONE. Suma md5 nie obejmuje `tr_status` ani `tr_paid`,
-      // czyli pol, na ktorych stoi decyzja o pieniadzach; podpis JWS obejmuje
-      // cale cialo. Wylaczenie ma byc jawna decyzja integratora.
+      // Turned on BY DEFAULT. The md5 checksum covers neither `tr_status` nor
+      // `tr_paid`, that is, the fields the decision about money rests on; the
+      // JWS signature covers the whole body. Turning it off is meant to be an
+      // explicit decision by the integrator.
       verifyJws = true,
     } = props
 
     if (!securityCode || merchantId === undefined || merchantId === null || merchantId === '') {
-      // Bez kodu bezpieczenstwa nie da sie odroznic powiadomienia od Tpay
-      // od zadania wyslanego przez kogokolwiek innego. Przyjmowanie takich
-      // powiadomien znaczyloby, ze zamowienie oplaca sie slowem honoru.
+      // Without the security code there is no way to tell a notification from
+      // Tpay apart from a request sent by anyone else. Accepting such
+      // notifications would mean an order can be paid for on one's word of
+      // honour.
       payload.logger.error(
         'Tpay: notification rejected because merchantId or securityCode is not configured',
       )
@@ -107,9 +110,10 @@ export const notificationsEndpoint = (
       }
     }
 
-    // Dwa niezalezne uchwyty na nasza transakcje: identyfikator Tpay oraz
-    // `tr_crc`, w ktorym siedzi identyfikator naszego dokumentu. Drugi ratuje
-    // sytuacje, w ktorej zapis identyfikatora Tpay nie doszedl do skutku.
+    // Two independent handles on our transaction: the Tpay identifier and
+    // `tr_crc`, which carries the identifier of our own document. The second
+    // one rescues the case where writing the Tpay identifier did not go
+    // through.
     let transaction: AnyDoc | undefined
 
     const byRemoteID = await payload.find({
@@ -138,9 +142,10 @@ export const notificationsEndpoint = (
         `Tpay: no transaction found for tr_id=${String(notification.tr_id)} tr_crc=${String(notification.tr_crc)}`,
       )
 
-      // Powiadomienie jest autentyczne, tylko nie mamy go z czym zestawic.
-      // Ponowienia niczego nie zmienia, wiec potwierdzamy odbior i zostawiamy
-      // slad w logu - to sprawa do reki operatora, nie do petli ponowien.
+      // The notification is authentic, we just have nothing to match it
+      // against. Retries would change nothing, so we acknowledge receipt and
+      // leave a trace in the log - this is a matter for an operator's hands,
+      // not for a retry loop.
       return okResponse()
     }
 
@@ -160,16 +165,17 @@ export const notificationsEndpoint = (
       return okResponse()
     }
 
-    // Kwota zaplacona bywa inna niz zadana: przy zwyklym przelewie to platnik
-    // wpisuje kwote w swoim banku. Niedoplata nie moze domykac zamowienia.
+    // The amount paid is sometimes different from the amount requested: on an
+    // ordinary bank transfer it is the payer who types the amount into their
+    // bank. An underpayment must not close the order.
     const expectedMinor = Number(transaction.amount)
     let paidMinor: number
 
     try {
       paidMinor = decimalStringToMinor(String(notification.tr_paid ?? '0'))
     } catch {
-      // Uwierzytelnione, ale zniekształcone: traktujemy jak niedoplate i
-      // potwierdzamy odbior, bo ponowienia Tpay nie naprawia tresci.
+      // Authenticated but malformed: we treat it like an underpayment and
+      // acknowledge receipt, because Tpay's retries will not repair the body.
       payload.logger.error(
         `Tpay: transaction ${String(transaction.id)} notification carries unreadable tr_paid=${JSON.stringify(notification.tr_paid)}. Order not created.`,
       )

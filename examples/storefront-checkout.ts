@@ -1,6 +1,4 @@
 /**
- * Przykład po stronie frontu sklepu: dwa wywołania, między nimi przekierowanie.
- *
  * Storefront example: two calls with a redirect in between.
  */
 
@@ -13,9 +11,10 @@ type InitiateResponse = {
 }
 
 /**
- * Krok 1. Wołane, gdy klient klika „Zapłać”. Zapamiętaj `transactionID`
- * (sessionStorage, parametr w adresie powrotu, cokolwiek przeżyje przekierowanie),
- * bo bez niego nie ma czym potwierdzić zamówienia po powrocie.
+ * Step 1. Called when the customer clicks "Pay". Remember the `transactionID`
+ * (sessionStorage, a parameter on the return URL, anything that survives the
+ * redirect), because without it there is nothing to confirm the order with
+ * after coming back.
  */
 export async function startPayment(args: {
   billingAddress: Record<string, unknown>
@@ -53,12 +52,13 @@ export async function startPayment(args: {
 }
 
 /**
- * Krok 2. Wołane na stronie powrotu (`payerSuccessUrl`).
+ * Step 2. Called on the return page (`payerSuccessUrl`).
  *
- * Powiadomienie serwer-serwer mogło już domknąć zamówienie i to jest normalne:
- * odpowiedź niesie wtedy ten sam identyfikator zamówienia, nie drugie zamówienie.
- * Błąd „not completed yet” znaczy, że Tpay jeszcze nie zaksięgował płatności -
- * warto wtedy ponowić za kilka sekund, zamiast pokazywać klientowi porażkę.
+ * The server-to-server notification may have closed the order already, and that
+ * is normal: the response then carries the same order identifier, not a second
+ * order. The error "not completed yet" means Tpay has not settled the payment
+ * yet - it is then worth retrying in a few seconds instead of showing the
+ * customer a failure.
  */
 export async function confirmPayment(args: {
   cartID: string

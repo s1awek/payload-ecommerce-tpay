@@ -6,14 +6,14 @@ dist/
 !.env.example
 .workspace/
 
-# Przechwyty z przebiegow e2e: niosa prawdziwy md5sum, czyli md5(znany prefiks + kod
-# bezpieczenstwa). W repozytorium, ktore ma byc opublikowane, to material do lamania
-# kodu offline. Zostaja lokalnie; do testow sluzy przygotowana atrapa.
+# Captures from e2e runs: they carry a real md5sum, that is, md5(known prefix +
+# security code). In a repository meant to be published, that is material for
+# offline code cracking. They stay local; the tests use a prepared stub instead.
 test/e2e/captures/
 
-# Gospodarz deweloperski: baza, logi i uchwyty procesow sa artefaktami przebiegu,
-# nie zrodlem. Adres tunelu zmienia sie przy kazdym uruchomieniu, wiec zapisany
-# w repozytorium byloby smieciem wskazujacym na cudzy host.
+# Development host: the database, logs and process handles are run artifacts,
+# not sources. The tunnel address changes on every start, so storing it in the
+# repository would be litter pointing at somebody else's host.
 dev/*.db
 dev/*.db-journal
 dev/*.db-shm
@@ -25,5 +25,5 @@ dev/payload-types.ts
 dev/media/
 /.workspace/
 
-# Zrzuty ekranu ze sklepu demo: artefakt sesji, nie zrodlo.
-dev/zrzuty/
+# Screenshots from the demo shop: a session artifact, not a source.
+dev/screenshots/

@@ -13,16 +13,17 @@ export class RemoteMismatchError extends Error {
 }
 
 /**
- * Status `correct` po stronie Tpay mowi, ze JAKAS transakcja zostala oplacona.
- * Zanim domkniemy zamowienie, musi to byc TA transakcja: o tej samej kwocie
- * i w tej samej walucie, co dokument w naszej bazie. Bez tego porownania dowod
- * zaplaty za tania transakcje daloby sie podstawic pod droga (audyt 11.09.2026,
- * ustalenia K-1 i W-4). Powiadomienie serwer-serwer ma odpowiednik tej bramki
- * w postaci porownania `tr_paid` z kwota transakcji.
+ * A `correct` status on Tpay's side says that SOME transaction has been paid.
+ * Before we close the order it has to be THIS transaction: the same amount and
+ * the same currency as the document in our database. Without that comparison,
+ * proof of payment for a cheap transaction could be substituted for an expensive
+ * one (audit 11.09.2026, findings K-1 and W-4). The server-to-server
+ * notification has its counterpart of this gate in the comparison of `tr_paid`
+ * against the transaction amount.
  *
- * Brak kwoty albo waluty w odpowiedzi API jest odmowa, nie pominieciem: przy
- * pieniadzach zmiana ksztaltu odpowiedzi ma zatrzymac sprzedaz glosno, a nie
- * przepuszczac wszystko po cichu.
+ * A missing amount or currency in the API response is a refusal, not something
+ * to skip over: where money is involved, a change in the shape of the response
+ * has to stop the sale loudly rather than let everything through quietly.
  */
 export const assertRemoteMatchesTransaction = (args: {
   remote: TpayTransaction | undefined
