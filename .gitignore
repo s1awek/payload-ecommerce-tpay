@@ -24,3 +24,6 @@ dev/*.url
 dev/payload-types.ts
 dev/media/
 /.workspace/
+
+# Zrzuty ekranu ze sklepu demo: artefakt sesji, nie zrodlo.
+dev/zrzuty/

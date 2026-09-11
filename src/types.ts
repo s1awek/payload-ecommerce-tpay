@@ -42,7 +42,10 @@ export type TpayAdapterArgs = {
   securityCode?: string
   /**
    * Sprawdzanie podpisu JWS (naglowek X-JWS-Signature) obok sumy md5.
-   * Wymaga polaczenia wychodzacego po certyfikat Tpay.
+   * Domyslnie `true`; `false` wylacza jawnie. Wymaga polaczenia wychodzacego
+   * po certyfikat Tpay. Suma md5 nie obejmuje `tr_status` ani `tr_paid`,
+   * wiec bez JWS jedno prawdziwe cialo powiadomienia da sie przerobic na
+   * „zaplacone" bez znajomosci kodu bezpieczenstwa.
    */
   verifyJws?: boolean
   /**

@@ -1,7 +1,9 @@
 import type { PayloadRequest } from 'payload'
 
+import { assertTransactionAccess } from './blik.js'
 import type { TpayClient } from './client.js'
 import { finalizeOrder, markTransactionStatus } from './finalize.js'
+import { assertRemoteMatchesTransaction } from './remote.js'
 import type { TpayAdapterArgs } from './types.js'
 
 type AnyDoc = Record<string, any>
@@ -61,6 +63,13 @@ export const confirmOrder =
         throw new Error('No transaction found for the provided identifier.')
       }
 
+      // Lokalne `find` omija kontrole dostepu Payloada, a identyfikatory
+      // transakcji sa kolejnymi liczbami. Bez tej bramki kazdy, kto przeszedl
+      // kontrole wtyczki wlasnym koszykiem, moglby potwierdzac cudze transakcje
+      // i odbierac ich `orderID` oraz `accessToken`. Dowody sa te same, co przy
+      // punktach BLIK-a: zalogowany wlasciciel albo sekret koszyka.
+      await assertTransactionAccess({ cartsSlug, req, secret: data.secret, transaction })
+
       // Powiadomienie od Tpay moglo juz zamknac te transakcje - wtedy nie ma
       // czego potwierdzac, jest gotowe zamowienie do zwrocenia.
       if (transaction.order) {
@@ -81,7 +90,11 @@ export const confirmOrder =
         }
       }
 
-      const remoteID = transaction.tpay?.transactionId || tpayTransactionID
+      // Identyfikator Tpay bierzemy WYLACZNIE z dokumentu transakcji. Ten z ciala
+      // zadania sluzy tylko do odnalezienia dokumentu; gdyby byl dowodem, kupujacy
+      // moglby podstawic identyfikator wlasnej, taniej transakcji pod droga,
+      // ktora nie dostala jeszcze swojego (okno miedzy `create` a zapisem).
+      const remoteID = transaction.tpay?.transactionId
 
       if (!remoteID) {
         throw new Error('The transaction has no Tpay transaction ID to verify against.')
@@ -109,6 +122,10 @@ export const confirmOrder =
           `Payment is not completed yet (Tpay status: ${String(remote?.status ?? 'unknown')}).`,
         )
       }
+
+      // `correct` znaczy „jakas transakcja oplacona". Ma to byc ta sama kwota
+      // i waluta, co w naszym dokumencie, inaczej dowod jest nie na te zakupy.
+      assertRemoteMatchesTransaction({ remote, transaction })
 
       const finished = await finalizeOrder({
         cartsSlug,

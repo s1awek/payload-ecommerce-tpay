@@ -40,7 +40,10 @@ export const notificationsEndpoint = (
       sandbox = false,
       securityCode,
       transactionsSlug = 'transactions',
-      verifyJws,
+      // Domyslnie WLACZONE. Suma md5 nie obejmuje `tr_status` ani `tr_paid`,
+      // czyli pol, na ktorych stoi decyzja o pieniadzach; podpis JWS obejmuje
+      // cale cialo. Wylaczenie ma byc jawna decyzja integratora.
+      verifyJws = true,
     } = props
 
     if (!securityCode || merchantId === undefined || merchantId === null || merchantId === '') {
@@ -160,7 +163,19 @@ export const notificationsEndpoint = (
     // Kwota zaplacona bywa inna niz zadana: przy zwyklym przelewie to platnik
     // wpisuje kwote w swoim banku. Niedoplata nie moze domykac zamowienia.
     const expectedMinor = Number(transaction.amount)
-    const paidMinor = decimalStringToMinor(String(notification.tr_paid ?? '0'))
+    let paidMinor: number
+
+    try {
+      paidMinor = decimalStringToMinor(String(notification.tr_paid ?? '0'))
+    } catch {
+      // Uwierzytelnione, ale zniekształcone: traktujemy jak niedoplate i
+      // potwierdzamy odbior, bo ponowienia Tpay nie naprawia tresci.
+      payload.logger.error(
+        `Tpay: transaction ${String(transaction.id)} notification carries unreadable tr_paid=${JSON.stringify(notification.tr_paid)}. Order not created.`,
+      )
+
+      return okResponse()
+    }
 
     if (Number.isFinite(expectedMinor) && paidMinor < expectedMinor) {
       payload.logger.error(

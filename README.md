@@ -50,6 +50,14 @@ export default buildConfig({
 })
 ```
 
+**Leave the plugin's `access` configuration alone unless you know what each function guards.** The
+development host in [`dev/`](dev/README.md) sets `isDocumentOwner: () => true` and
+`publicAccess: () => true` so that scripts can drive it without logging in. Copied into a shop, that
+configuration lets any signed in customer create an order with a plain `POST /api/orders`, without
+paying anything: the plugin gives `orders` and `transactions` `create: isAdmin`, and the host's
+`isAdmin` is "any logged in user". Nothing in this adapter can defend a shop whose own collections
+accept orders from anyone. Keep the plugin defaults, or write access functions that check a role.
+
 Client side, wherever you configure the storefront:
 
 ```ts
@@ -84,7 +92,7 @@ Set that full public URL as the notification address, either per transaction (th
 1. The storefront calls `POST /api/payments/tpay/initiate`. The adapter writes a `pending` transaction, creates the matching transaction in Tpay and returns `paymentUrl`.
 2. The storefront redirects the customer to `paymentUrl`.
 3. Tpay charges the customer and sends a server to server notification to the endpoint above. The adapter verifies it and creates the order.
-4. The customer comes back to `payerSuccessUrl`, and the storefront calls `POST /api/payments/tpay/confirm-order` with the `transactionID` returned in step 1 **and the `cartID`** (plus the cart `secret` for a guest cart). The adapter itself only needs the transaction, but the plugin's handler rejects the request with `Cart ID is required.` before the adapter is ever reached, so send both.
+4. The customer comes back to `payerSuccessUrl`, and the storefront calls `POST /api/payments/tpay/confirm-order` with the `transactionID` returned in step 1 **and the `cartID`** (plus the cart `secret` for a guest cart). The plugin's handler rejects the request with `Cart ID is required.` before the adapter is ever reached, and the adapter then checks that same `secret` (or the logged in owner) against the transaction being confirmed, so send all of them.
 
 Steps 3 and 4 both finish the order, whichever arrives first, and neither creates a second one. That matters because a redirect payment has no guarantee the browser ever comes back: the customer can pay with BLIK and close the tab.
 
@@ -119,10 +127,14 @@ A notification endpoint is a public URL, so everything about it assumes someone 
 
 - **Checksum.** Every notification carries an md5 computed from the merchant ID, transaction ID, amount, `tr_crc` and your security code. A notification without a matching checksum is answered with HTTP 400 and no order is created. Missing configuration is a refusal too, never a silent pass.
 - **What the checksum does not cover.** Those five inputs are the whole recipe, so `tr_status`, `tr_paid`, `tr_currency`, `tr_email` and `test_mode` sit outside it: change any of them and the same md5 still matches. Two of those, `tr_status` and `tr_paid`, are exactly the fields this adapter reads to decide that an order is paid. The checksum therefore authenticates *which* transaction a message is about, not *what it says happened* to it. Measured against a real sandbox notification and pinned in `test/notification-shape.test.js`.
-- **JWS signature.** Second layer, enabled with `verifyJws: true`, and the only one that covers the whole body including the fields above. Turn it on in production. The certificate is fetched only from the Tpay host for the current environment, so a forged `x5u` pointing anywhere else is rejected before any outbound request is made. Pass `jwsRootCertificate` to also verify the chain against Tpay's root.
+- **JWS signature.** Second layer, **on by default**, and the only one that covers the whole body including the fields above. A notification without a valid `X-JWS-Signature` header is answered with HTTP 400. The certificate is fetched only from the Tpay host for the current environment, so a forged `x5u` pointing anywhere else is rejected before any outbound request is made. Pass `jwsRootCertificate` to also verify the chain against Tpay's root. `verifyJws: false` switches the layer off, which leaves a paid order one leaked notification body away from anyone who can reach the endpoint; do that knowingly.
 - **`test_mode` is not an environment marker.** A sandbox notification arrives with `test_mode=0`. Do not branch on it to tell test traffic from real traffic; use your own configuration.
 - **Underpayment.** With a plain bank transfer the payer types the amount themselves. If less arrives than the order is worth, the order is not created and the transaction stays pending with an error in the log.
 - **Payment state comes from the Tpay API, never from the browser.** The return URL is client side and anyone can open it by hand, so `confirm-order` asks Tpay what actually happened.
+- **The proof of payment has to be about this transaction.** `confirm-order` and `/blik-status` ask Tpay about the transaction ID stored on the document, never about one supplied in the request, and a `correct` answer only counts if Tpay reports the same amount and currency as the document. Without that, a buyer could pay for a cheap transaction and present that payment as proof for an expensive one. A mismatch is refused, and so is an API answer with no amount at all: a change in the API's shape stops sales loudly instead of waving everything through.
+- **Nobody confirms a transaction they cannot prove is theirs.** Transaction IDs are sequential integers, and Payload's local API bypasses collection access, so `confirm-order` applies the same gate as the BLIK endpoints: the request has to come from the logged in owner of the transaction or carry the cart `secret`. That gate sits in front of the "already confirmed" answer too, so an order's `accessToken` is never handed to a stranger who guessed the ID.
+- **The address on the transaction wins.** The customer email recorded at `initiate` is what the order is created with. An email in a later request only fills the gap when the transaction has none, so knowing someone's transaction ID does not let you become the owner of their order.
+- **Errors leave the details in the log.** Anything that is not a deliberate answer (`403`, `409`) comes back from the BLIK endpoints as a fixed message; the text of the underlying exception, including Tpay API paths and status codes, is written to the Payload logger only.
 
 ## Amounts
 
@@ -157,6 +169,12 @@ decimalStringToMinor('19.99') // 1999
   therefore never reaches the plugin's decrement. Measured on a live instance: a completed BLIK
   payment created the order and left stock at 5. Adjust inventory yourself once, when `/blik-status`
   first answers `paid`.
+- **Record "stock already adjusted" on the order, not in memory.** The demo shop keeps that marker in
+  a process level set, which is fine for a demo and wrong for a shop: a restart forgets it, and the
+  next `paid` answer decrements the same transaction again. Persist it on the order document.
+- **A chargeback changes the transaction, not the order.** A `CHARGEBACK` notification sets the
+  transaction to `refunded` and leaves the order in `processing`. A shop that watches orders alone
+  will not see that the money went back; watch the transaction status, or add a hook that mirrors it.
 - **Finishing an order is not an atomic compare and swap.** `payload.update` with a `where` clause is a find followed by a per-document write, so there is a narrow window in which the notification and the browser both believe they finished the order. The result is an orphaned order document, never a double charge, since there is only ever one payment. Closing the window would mean bypassing collection hooks, which is the worse trade.
 - Recurring payments, card tokenisation, marketplace transactions and refunds through the API are not implemented.
 

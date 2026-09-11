@@ -34,7 +34,7 @@ const makeClient = (status = 'pending', payments = undefined) => {
       getTransaction: async (id) => {
         odpytane.push(id)
 
-        return { status, transactionId: id, ...(payments ? { payments } : {}) }
+        return { amount: 19.99, currency: 'PLN', status, transactionId: id, ...(payments ? { payments } : {}) }
       },
       payByTransactionId: async (id, fields) => {
         wyslane.push({ fields, id })
@@ -334,5 +334,47 @@ describe('odczyt stanu platnosci', () => {
 
     assert.equal(response.status, 200)
     assert.equal((await response.json()).status, 'pending')
+  })
+})
+
+describe('audyt 11.09.2026: tozsamosc dowodu zaplaty i tresc bledow w punktach BLIK-a', () => {
+  it('W-4: status paid o innej kwocie nie domyka zamowienia i odpowiada 409 stalym komunikatem', async () => {
+    const payload = new PayloadStub()
+    seed(payload) // 1999 groszy
+    const client = {
+      getTransaction: async () => ({ amount: 1.0, currency: 'PLN', status: 'correct' }),
+      payByTransactionId: async () => ({ result: 'success' }),
+    }
+
+    const response = await blikStatusEndpoint({ client }).handler(
+      makeReq(payload, { data: { secret: SEKRET, transactionID: 'transactions-1' } }),
+    )
+
+    assert.equal(response.status, 409)
+    assert.deepEqual(await response.json(), { message: 'The payment does not match this transaction.' })
+    assert.equal(payload.docs('orders').length, 0)
+    assert.equal(payload.docs('transactions')[0].status, 'pending')
+    assert.equal(payload.logs.error.length, 1, 'szczegoly ida do logu')
+  })
+
+  it('S-5: blad spoza BlikError nie wynosi na zewnatrz tresci wyjatku', async () => {
+    const payload = new PayloadStub()
+    seed(payload)
+    const client = {
+      getTransaction: async () => {
+        throw new Error('GET https://api.tpay.com/transactions/TR-1 failed with 502: upstream')
+      },
+      payByTransactionId: async () => ({ result: 'success' }),
+    }
+
+    const response = await blikStatusEndpoint({ client }).handler(
+      makeReq(payload, { data: { secret: SEKRET, transactionID: 'transactions-1' } }),
+    )
+    const body = await response.json()
+
+    assert.equal(response.status, 500)
+    assert.equal(body.message, 'Payment could not be processed.')
+    assert.doesNotMatch(JSON.stringify(body), /api\.tpay\.com|502/)
+    assert.match(String(payload.logs.error[0]?.err?.message), /502/, 'a w logu szczegoly sa')
   })
 })

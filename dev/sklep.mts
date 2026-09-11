@@ -101,6 +101,19 @@ const listaProduktow = async () => {
  * Stan bazy wokol jednej transakcji - panel „co sie stalo w bazie” na stronie.
  * To jest to, czego kupujacy nie widzi, a wlasciciel sklepu chce zobaczyc.
  */
+// Odczyt stanu wymaga sekretu koszyka: bez niego kazdy znalby kwoty, adresy Tpay
+// i zamowienia cudzych transakcji (identyfikatory sa kolejnymi liczbami). Nieznany
+// identyfikator i zly sekret daja te sama odpowiedz, zeby nie zdradzac, ktore istnieja.
+const stanTransakcjiDlaWlasciciela = async (body: any) => {
+  const transactionID = Number(body.transactionID)
+  if (!transactionID || typeof body.secret !== 'string' || !body.secret) return null
+  let tx: any
+  try { tx = await payload.findByID({ collection: 'transactions', depth: 0, id: transactionID }) } catch { return null }
+  const koszyk = (await payload.findByID({ collection: 'carts', depth: 0, id: tx.cart }).catch(() => null)) as any
+  if (!koszyk || koszyk.secret !== body.secret) return null
+  return await stanTransakcji(transactionID)
+}
+
 const stanTransakcji = async (transactionID: number) => {
   const tx = (await payload.findByID({ collection: 'transactions', depth: 0, id: transactionID })) as any
   const zamowienie = tx.order
@@ -156,7 +169,10 @@ const utworzKoszyk = async (body: any) => {
   const items: any[] = []
   for (const p of pozycje) {
     const produkt = (await payload.findByID({ collection: 'products', depth: 0, id: p.product })) as any
-    const ilosc = Math.max(1, Number(p.quantity) || 1)
+    // Ilosc: liczba calkowita 1..99. Ulamek albo ogromna liczba z DevTools nie ma
+    // czego psuc w kwocie (hak wtyczki liczy ja z tej samej ilosci), ale wzor
+    // integracji ma pokazywac walidacje wejscia, nie jej brak.
+    const ilosc = Math.min(99, Math.max(1, Math.floor(Number(p.quantity)) || 1))
     suma += Number(produkt.priceInPLN) * ilosc
     items.push({ product: produkt.id, quantity: ilosc })
   }
@@ -195,8 +211,11 @@ const przekazDoApi = async (nodeReq: http.IncomingMessage, nodeRes: http.ServerR
   })
   log(nodeReq.method, sciezka, `(cialo ${cialo?.length ?? 0} B)`)
   if (sciezka.includes('notifications') && cialo?.length) {
-    log('CIALO POWIADOMIENIA:', cialo.toString('utf8'))
-    log('X-JWS-Signature:', naglowki.get('x-jws-signature') || '(brak)')
+    // Do logu idzie tylko identyfikator i fakt obecnosci podpisu. Cale cialo
+    // (z `md5sum`) to material do lamania kodu bezpieczenstwa offline - ten sam,
+    // ktory .gitignore wyklucza z repozytorium; nie ma go co sypac do dev/*.log.
+    const pola = new URLSearchParams(cialo.toString('utf8'))
+    log('POWIADOMIENIE tr_id=', pola.get('tr_id') || '(brak)', 'tr_status=', pola.get('tr_status') || '(brak)', 'X-JWS-Signature:', naglowki.has('x-jws-signature') ? 'jest' : 'BRAK')
   }
   const payloadReq = await createPayloadRequest({ config: sanitized, request })
   const odpowiedz = await endpoint.handler(payloadReq)
@@ -225,10 +244,9 @@ const serwer = http.createServer(async (nodeReq, nodeRes) => {
     if (metoda === 'GET' && url.pathname === '/sklep/konfiguracja') return json(nodeRes, 200, { adresPubliczny: (process.env.NEXT_PUBLIC_SERVER_URL || '').replace(/\/+$/, '') })
     if (metoda === 'GET' && url.pathname === '/sklep/produkty') return json(nodeRes, 200, { produkty: await listaProduktow() })
     if (metoda === 'POST' && url.pathname === '/sklep/koszyk') return json(nodeRes, 200, await utworzKoszyk(await czytajJson(nodeReq)))
-    if (metoda === 'GET' && url.pathname === '/sklep/stan') {
-      const t = Number(url.searchParams.get('t'))
-      if (!t) return json(nodeRes, 400, { message: 'brak t' })
-      return json(nodeRes, 200, await stanTransakcji(t))
+    if (metoda === 'POST' && url.pathname === '/sklep/stan') {
+      const stan = await stanTransakcjiDlaWlasciciela(await czytajJson(nodeReq))
+      return stan ? json(nodeRes, 200, stan) : json(nodeRes, 403, { message: 'brak dostepu do tej transakcji' })
     }
     if (metoda === 'POST' && url.pathname === '/sklep/zdejmij-stan') return json(nodeRes, 200, await zdejmijStan(await czytajJson(nodeReq)))
 

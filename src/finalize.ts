@@ -84,7 +84,11 @@ export async function finalizeOrder(args: FinalizeArgs): Promise<FinalizeResult>
   }
 
   const customerID = idOf(transaction.customer)
-  const email = customerEmail || transaction.customerEmail
+  // Adres zapisany na transakcji przy `initiate` ma pierwszenstwo. Adres
+  // z pozniejszego zadania (powrot przegladarki, powiadomienie) jest tylko
+  // uzupelnieniem, gdy transakcja go nie ma - inaczej ktos, kto zna cudzy
+  // identyfikator transakcji, przypisalby sobie zamowienie oplacone przez kogo innego.
+  const email = transaction.customerEmail || customerEmail
 
   const order = (await payload.create({
     collection: ordersSlug,

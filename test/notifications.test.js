@@ -50,6 +50,8 @@ const call = async (payload, raw, props = {}) => {
   const endpoint = notificationsEndpoint({
     merchantId: MERCHANT_ID,
     securityCode: SECURITY_CODE,
+    // Testy sumy md5 wylaczaja JWS jawnie; domyslna wartosc mierzy osobny test.
+    verifyJws: false,
     ...props,
   })
 
@@ -216,5 +218,43 @@ describe('punkt odbioru powiadomien', () => {
 
     assert.equal(response.status, 400)
     assert.equal(payload.docs('orders').length, 0)
+  })
+})
+
+describe('audyt 11.09.2026: wartosci domyslne i odpornosc punktu powiadomien', () => {
+  it('S-1: bez jawnej decyzji podpis JWS jest wymagany - powiadomienie bez naglowka odpada', async () => {
+    const payload = new PayloadStub()
+    seed(payload)
+    const endpoint = notificationsEndpoint({ merchantId: MERCHANT_ID, securityCode: SECURITY_CODE })
+
+    const response = await endpoint.handler(makeReq(payload, { body: body({}) }))
+
+    assert.equal(response.status, 400)
+    assert.equal(await response.text(), 'FALSE')
+    assert.equal(payload.docs('orders').length, 0)
+    assert.match(String(payload.logs.error[0]), /X-JWS-Signature/)
+  })
+
+  it('S-1: verifyJws: false wylacza wymaganie jawnie (znane-dobre)', async () => {
+    const payload = new PayloadStub()
+    seed(payload)
+
+    const response = await call(payload, body({}), { verifyJws: false })
+
+    assert.equal(response.status, 200)
+    assert.equal(payload.docs('orders').length, 1)
+  })
+
+  it('N-1: uwierzytelnione powiadomienie ze zniekształconym tr_paid konczy sie TRUE bez zamowienia', async () => {
+    const payload = new PayloadStub()
+    seed(payload)
+
+    const response = await call(payload, body({ tr_paid: 'dwadziescia' }))
+
+    assert.equal(response.status, 200)
+    assert.equal(await response.text(), 'TRUE', 'nie zmuszamy Tpay do wiecznych ponowien')
+    assert.equal(payload.docs('orders').length, 0)
+    assert.equal(payload.docs('transactions')[0].status, 'pending')
+    assert.match(String(payload.logs.error[0]), /unreadable tr_paid/)
   })
 })

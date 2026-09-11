@@ -19,6 +19,36 @@ const seedTransaction = (payload, overrides = {}) =>
   })
 
 describe('domykanie zamowienia', () => {
+  it('W-3: adres z zadania nie nadpisuje adresu zapisanego na transakcji', async () => {
+    const payload = new PayloadStub()
+    payload.seed('carts', { id: 'carts-1' })
+    const transaction = seedTransaction(payload, { customerEmail: 'ofiara@example.pl' })
+
+    await finalizeOrder({
+      customerEmail: 'napastnik@example.invalid',
+      req: makeReq(payload),
+      transaction,
+      transactionsSlug: 'transactions',
+    })
+
+    assert.equal(payload.docs('orders')[0].customerEmail, 'ofiara@example.pl')
+  })
+
+  it('W-3: adres z zadania uzupelnia transakcje, ktora go nie ma', async () => {
+    const payload = new PayloadStub()
+    payload.seed('carts', { id: 'carts-1' })
+    const transaction = seedTransaction(payload, { customerEmail: undefined })
+
+    await finalizeOrder({
+      customerEmail: 'z-powiadomienia@example.pl',
+      req: makeReq(payload),
+      transaction,
+      transactionsSlug: 'transactions',
+    })
+
+    assert.equal(payload.docs('orders')[0].customerEmail, 'z-powiadomienia@example.pl')
+  })
+
   it('tworzy zamowienie, przestawia transakcje i oznacza koszyk jako kupiony', async () => {
     const payload = new PayloadStub()
     payload.seed('carts', { id: 'carts-1' })

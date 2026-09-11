@@ -4,8 +4,10 @@ import { describe, it } from 'node:test'
 import { confirmOrder } from '../dist/confirmOrder.js'
 import { makeReq, PayloadStub } from './helpers/payload-stub.js'
 
+const SEKRET = 'sekret-koszyka-abc'
+
 const seed = (payload, overrides = {}) => {
-  payload.seed('carts', { id: 'carts-1' })
+  payload.seed('carts', { id: 'carts-1', secret: SEKRET })
 
   return payload.seed('transactions', {
     id: 'transactions-1',
@@ -21,7 +23,8 @@ const seed = (payload, overrides = {}) => {
   })
 }
 
-const clientReturning = (status) => {
+/** Atrapa API Tpay: kwota i waluta takie, jak w zasianej transakcji (19.99 PLN). */
+const clientReturning = (status, extra = {}) => {
   const calls = []
 
   return {
@@ -30,7 +33,7 @@ const clientReturning = (status) => {
       getTransaction: async (id) => {
         calls.push(id)
 
-        return { status, transactionId: id }
+        return { amount: 19.99, currency: 'PLN', status, transactionId: id, ...extra }
       },
     },
   }
@@ -43,7 +46,7 @@ describe('potwierdzenie zamowienia po powrocie platnika', () => {
     const { calls, client } = clientReturning('correct')
 
     const result = await confirmOrder({ client })({
-      data: { transactionID: 'transactions-1' },
+      data: { secret: SEKRET, transactionID: 'transactions-1' },
       req: makeReq(payload),
     })
 
@@ -59,7 +62,7 @@ describe('potwierdzenie zamowienia po powrocie platnika', () => {
     const { client } = clientReturning('pending')
 
     await assert.rejects(
-      confirmOrder({ client })({ data: { transactionID: 'transactions-1' }, req: makeReq(payload) }),
+      confirmOrder({ client })({ data: { secret: SEKRET, transactionID: 'transactions-1' }, req: makeReq(payload) }),
       /not completed yet/,
     )
 
@@ -73,7 +76,7 @@ describe('potwierdzenie zamowienia po powrocie platnika', () => {
     const { client } = clientReturning('declined')
 
     await assert.rejects(
-      confirmOrder({ client })({ data: { transactionID: 'transactions-1' }, req: makeReq(payload) }),
+      confirmOrder({ client })({ data: { secret: SEKRET, transactionID: 'transactions-1' }, req: makeReq(payload) }),
       /not completed yet/,
     )
 
@@ -87,7 +90,7 @@ describe('potwierdzenie zamowienia po powrocie platnika', () => {
     const { calls, client } = clientReturning('correct')
 
     const result = await confirmOrder({ client })({
-      data: { transactionID: 'transactions-1' },
+      data: { secret: SEKRET, transactionID: 'transactions-1' },
       req: makeReq(payload),
     })
 
@@ -103,7 +106,7 @@ describe('potwierdzenie zamowienia po powrocie platnika', () => {
     const { client } = clientReturning('correct')
 
     const result = await confirmOrder({ client })({
-      data: { tpayTransactionID: 'TR-1' },
+      data: { secret: SEKRET, tpayTransactionID: 'TR-1' },
       req: makeReq(payload),
     })
 
@@ -122,6 +125,116 @@ describe('potwierdzenie zamowienia po powrocie platnika', () => {
     await assert.rejects(
       confirmOrder({ client })({ data: { transactionID: 'brak' }, req: makeReq(payload) }),
       /No transaction found/,
+    )
+  })
+
+  // --- audyt 11.09.2026: bramki dostepu i tozsamosci dowodu zaplaty ---
+
+  it('K-1: nie domyka transakcji bez identyfikatora Tpay dowodem podanym w zadaniu', async () => {
+    const payload = new PayloadStub()
+    // Okno miedzy `create` a zapisem identyfikatora Tpay: dokument jest, identyfikatora nie ma.
+    seed(payload, { amount: 149000, tpay: {} })
+    const { calls, client } = clientReturning('correct', { amount: 1490 })
+
+    await assert.rejects(
+      confirmOrder({ client })({
+        // dowod zaplaty za WLASNA, tania transakcje podstawiony pod droga
+        data: { secret: SEKRET, tpayTransactionID: 'TR-TANIA', transactionID: 'transactions-1' },
+        req: makeReq(payload),
+      }),
+      /no Tpay transaction ID/,
+    )
+
+    assert.deepEqual(calls, [], 'identyfikator z ciala zadania nie moze trafic do API jako dowod')
+    assert.equal(payload.docs('orders').length, 0)
+    assert.equal(payload.docs('transactions')[0].status, 'pending')
+  })
+
+  it('W-1: odrzuca potwierdzenie bez sekretu koszyka i bez zalogowanego wlasciciela', async () => {
+    const payload = new PayloadStub()
+    seed(payload)
+    const { calls, client } = clientReturning('correct')
+
+    await assert.rejects(
+      confirmOrder({ client })({ data: { transactionID: 'transactions-1' }, req: makeReq(payload) }),
+      /not allowed/,
+    )
+    await assert.rejects(
+      confirmOrder({ client })({
+        data: { secret: 'sekret-napastnika', transactionID: 'transactions-1' },
+        req: makeReq(payload),
+      }),
+      /not allowed/,
+    )
+
+    assert.deepEqual(calls, [], 'bez prawa do transakcji nie pytamy nawet Tpay')
+    assert.equal(payload.docs('orders').length, 0)
+  })
+
+  it('W-1: transakcja juz domknieta tez jest za bramka - orderID i accessToken nie wyciekaja', async () => {
+    const payload = new PayloadStub()
+    payload.seed('orders', { id: 'orders-1', accessToken: 'token-wlasciciela' })
+    seed(payload, { order: 'orders-1', status: 'succeeded' })
+    const { client } = clientReturning('correct')
+
+    await assert.rejects(
+      confirmOrder({ client })({
+        data: { secret: 'sekret-napastnika', transactionID: 'transactions-1' },
+        req: makeReq(payload),
+      }),
+      /not allowed/,
+    )
+  })
+
+  it('W-1: przepuszcza zalogowanego wlasciciela transakcji bez sekretu', async () => {
+    // znane-dobre: bramka, ktora nigdy nie przepuszcza, jest tak samo zepsuta
+    const payload = new PayloadStub()
+    seed(payload, { customer: 'users-7' })
+    const { client } = clientReturning('correct')
+
+    const result = await confirmOrder({ client })({
+      data: { transactionID: 'transactions-1' },
+      req: makeReq(payload, { user: { id: 'users-7' } }),
+    })
+
+    assert.equal(result.message, 'Order confirmed successfully')
+  })
+
+  it('W-4: zaplata o innej kwocie niz transakcja nie domyka zamowienia', async () => {
+    const payload = new PayloadStub()
+    seed(payload) // 1999 groszy
+    const { client } = clientReturning('correct', { amount: 1.0 })
+
+    await assert.rejects(
+      confirmOrder({ client })({ data: { secret: SEKRET, transactionID: 'transactions-1' }, req: makeReq(payload) }),
+      /amount does not match/,
+    )
+
+    assert.equal(payload.docs('orders').length, 0)
+    assert.equal(payload.docs('transactions')[0].status, 'pending')
+  })
+
+  it('W-4: zaplata w innej walucie niz transakcja nie domyka zamowienia', async () => {
+    const payload = new PayloadStub()
+    seed(payload) // PLN
+    const { client } = clientReturning('correct', { currency: 'EUR' })
+
+    await assert.rejects(
+      confirmOrder({ client })({ data: { secret: SEKRET, transactionID: 'transactions-1' }, req: makeReq(payload) }),
+      /currency does not match/,
+    )
+
+    assert.equal(payload.docs('orders').length, 0)
+  })
+
+  it('W-4: odpowiedz API bez kwoty jest odmowa, nie pominieciem kontroli', async () => {
+    const payload = new PayloadStub()
+    seed(payload)
+    const { client } = clientReturning('correct', { amount: undefined })
+
+    await assert.rejects(
+      confirmOrder({ client })({ data: { secret: SEKRET, transactionID: 'transactions-1' }, req: makeReq(payload) }),
+      /amount does not match/,
     )
   })
 })

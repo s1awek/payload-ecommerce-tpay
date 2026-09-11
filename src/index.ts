@@ -123,7 +123,13 @@ export const tpayAdapterClient = (props: TpayAdapterClientArgs = {}): PaymentAda
   label: props.label || 'BLIK, przelew, karta (Tpay)',
 })
 
-export { minorToDecimalString, decimalStringToMinor, normalizeAmountString } from './amount.js'
+export {
+  apiAmountToMinor,
+  decimalStringToMinor,
+  minorToDecimalString,
+  normalizeAmountString,
+} from './amount.js'
+export { assertRemoteMatchesTransaction, RemoteMismatchError } from './remote.js'
 export {
   TpayApiError,
   TpayClient,

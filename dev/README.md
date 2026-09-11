@@ -47,6 +47,15 @@ clamped shut, and the two are indistinguishable from the outside. Once both pass
 notification means Tpay is quiet, rather than your tunnel being broken. Without this step
 those two states look identical, and the second one wastes hours.
 
+**With JWS verification on, which is the adapter's default, the second half cannot pass.** The
+script has no Tpay private key, so an unsigned body with a correct md5 is rejected exactly like a
+forged one, and the script then only proves that both requests reached the handler through the
+tunnel (the literal `FALSE`, rather than a tunnel error page or a 404). The positive proof of the
+whole pipeline is a real, signed sandbox notification: after a BLIK payment the host log shows
+`POWIADOMIENIE tr_id=... X-JWS-Signature: jest` followed by `-> 200 TRUE`. To measure the md5 layer
+on its own, start the host with `TPAY_VERIFY_JWS=false` and run the check with the same variable;
+that switch exists only in this host's `payload.config.ts`, not in the adapter.
+
 ## Two things this host made visible
 
 **`products` has no default.** The plugin's own type documents `products` as defaulting to
@@ -88,6 +97,13 @@ Two things worth repeating from the package README, because both were found here
 visible from unit tests: Tpay answers `success` to a code that is not valid, and a refused code
 leaves the transaction reading `pending` with the refusal recorded only in `payments.attempts`.
 
+## The access configuration here is for scripts, not for shops
+
+`payload.config.ts` sets `isDocumentOwner: () => true` and `publicAccess: () => true`, and treats any
+logged in user as an admin. That lets the scripts in this directory read and write every collection
+without a session. Copied into a real shop it lets any customer create orders with `POST /api/orders`
+and never touch Tpay; the package README says the same in the configure section. Do not copy it.
+
 ## The click-through shop
 
 `sklep.mts` serves the same Payload instance as `serwer.mts`, plus one HTML page (`sklep.html`):
@@ -104,7 +120,12 @@ package README says a shop must write itself: it remembers the transaction id ac
 calls `confirm-order` at most once per transaction (a reload of the return page is refused, because
 the plugin decrements stock on every call), and after a BLIK payment decrements stock once itself
 (`/sklep/zdejmij-stan`), since the BLIK path never reaches the plugin's decrement. The right hand
-panel shows what happened in the database after each step, read through the local API.
+panel shows what happened in the database after each step, read through the local API; that read
+(`POST /sklep/stan`) and the stock decrement both require the cart `secret`, and answer an unknown
+transaction and a wrong secret identically, so a browser cannot enumerate other people's payments.
+Prices and quantities are taken from the server, never from the page. The process log records a
+notification's `tr_id`, status and whether it was signed, never the body: the body carries the md5
+that the security code can be brute forced from.
 
 The products collection gets a `title` field through `productsCollectionOverride` in
 `payload.config.ts`, because the plugin's default collection has no name field at all. The redirect

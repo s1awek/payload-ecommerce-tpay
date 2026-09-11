@@ -69,3 +69,32 @@ export function decimalStringToMinor(value: string, decimals = 2): number {
 export function normalizeAmountString(value: string, decimals = 2): string {
   return minorToDecimalString(decimalStringToMinor(value, decimals), decimals)
 }
+
+/**
+ * Kwota z odpowiedzi REST API Tpay (`GET /transactions/{id}`) na jednostki
+ * podrzedne. API zwraca `amount` jako liczbe JSON (19.99), nie napis, wiec
+ * arytmetyka na napisach z powiadomien tu nie siega: zaokraglenie do jednostki
+ * podrzednej waluty jest jedyna sensowna interpretacja liczby zmiennoprzecinkowej
+ * o dwu miejscach. Napis przechodzi ta sama droga co `tr_paid`.
+ * Wartosc, ktorej nie da sie odczytac, daje `undefined` - decyzje o skutkach
+ * podejmuje wywolujacy, a przy pieniadzach powinna byc to odmowa.
+ */
+export function apiAmountToMinor(value: unknown, decimals = 2): number | undefined {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return undefined
+    }
+
+    return Math.round(value * 10 ** decimals)
+  }
+
+  if (typeof value === 'string' && value.trim() !== '') {
+    try {
+      return decimalStringToMinor(value, decimals)
+    } catch {
+      return undefined
+    }
+  }
+
+  return undefined
+}

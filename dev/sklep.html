@@ -301,7 +301,11 @@ async function obsluzPowrot(sciezka) {
   // Wtyczka wymaga koszyka i jego sekretu (gość), adapter bierze transactionID; bez cartID odpowiada 400 „Cart ID is required”.
   const r = await post(`${API}/confirm-order`, { cartID: platnosc.cartID, secret: platnosc.secret, customerEmail: $('f-email').value.trim() || 'kupujacy@example.invalid', transactionID: platnosc.transactionID });
   if (r.status === 200) ustawStatus('ok', `<b>Zapłacono.</b> ${r.body?.message || ''} Zamówienie nr ${r.body?.orderID ?? '(patrz baza)'}.`);
-  else ustawStatus('blad', `confirm-order odpowiedział ${r.status}: ${r.body?.message || ''}`);
+  else {
+    // Kupujący widzi stały komunikat; treść odpowiedzi idzie do konsoli i do logu serwera.
+    console.warn('confirm-order', r.status, r.body);
+    ustawStatus('blad', '<b>Nie udało się potwierdzić płatności.</b> Jeśli pieniądze zostały pobrane, zamówienie domknie powiadomienie z Tpay. Szczegóły odpowiedzi są w konsoli przeglądarki.');
+  }
   zakoncz();
 }
 
@@ -312,7 +316,8 @@ function nowyZakup() { platnosc = null; sessionStorage.removeItem('platnosc'); h
 
 async function odswiezBaze() {
   if (!platnosc) return;
-  const r = await fetch('/sklep/stan?t=' + platnosc.transactionID); const s = await r.json();
+  const r = await post('/sklep/stan', { transactionID: platnosc.transactionID, secret: platnosc.secret }); const s = r.body;
+  if (r.status !== 200 || !s) { $('baza').innerHTML = '<p>Brak dostępu do stanu tej transakcji.</p>'; return; }
   const t = s.transakcja, z = s.zamowienie;
   const wiersze = [
     ['transakcja #' + t.id, `status <b>${t.status}</b>, ${zl(t.kwota)} ${t.waluta}, id Tpay ${t.tpayId || '-'}`],

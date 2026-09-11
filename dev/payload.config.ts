@@ -61,6 +61,11 @@ export default buildConfig({
             payerErrorUrl: adresPubliczny ? `${adresPubliczny}/blad` : undefined,
             payerSuccessUrl: adresPubliczny ? `${adresPubliczny}/powrot` : undefined,
             sandbox: true,
+            // Domyslnie adapter WYMAGA podpisu JWS (piaskownica Tpay tez go wysyla).
+            // Pokretlo tylko dla `kontrola-toru.mjs`: bez klucza Tpay nie da sie
+            // wyprodukowac znanego-dobrego podpisu, wiec warstwe md5 mierzy sie
+            // osobno, na gospodarzu uruchomionym z TPAY_VERIFY_JWS=false.
+            verifyJws: process.env.TPAY_VERIFY_JWS !== 'false',
           }),
         ],
       },

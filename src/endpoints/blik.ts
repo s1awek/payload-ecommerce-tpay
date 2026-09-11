@@ -10,6 +10,7 @@ import {
 import type { TpayClient } from '../client.js'
 import { TPAY_STATUS_PAID } from '../confirmOrder.js'
 import { finalizeOrder, markTransactionStatus } from '../finalize.js'
+import { assertRemoteMatchesTransaction, RemoteMismatchError } from '../remote.js'
 import type { TpayAdapterArgs } from '../types.js'
 
 type AnyDoc = Record<string, any>
@@ -145,6 +146,9 @@ const resolveState = async (args: {
   const remoteStatus = String(remote?.status ?? 'unknown')
 
   if (remoteStatus === TPAY_STATUS_PAID) {
+    // Ta sama bramka co w `confirm-order`: oplacona ma byc TA transakcja.
+    assertRemoteMatchesTransaction({ remote, transaction })
+
     const finished = await finalizeOrder({
       cartsSlug,
       customerEmail: transaction.customerEmail,
@@ -214,10 +218,13 @@ const errorResponse = (req: PayloadRequest, error: unknown, msg: string): Respon
 
   req.payload.logger.error({ err: error, msg })
 
-  return jsonResponse(
-    { message: error instanceof Error ? error.message : 'Unknown error.' },
-    500,
-  )
+  if (error instanceof RemoteMismatchError) {
+    return jsonResponse({ message: 'The payment does not match this transaction.' }, error.status)
+  }
+
+  // Szczegoly (w tym tresc `TpayApiError` z metoda i sciezka API) zostaja
+  // w logu. Na zewnatrz idzie staly komunikat, tak jak z handlera wtyczki.
+  return jsonResponse({ message: 'Payment could not be processed.' }, 500)
 }
 
 /**
