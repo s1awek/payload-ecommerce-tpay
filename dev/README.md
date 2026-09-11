@@ -87,3 +87,26 @@ create a payment without a notification address, but that address is never reach
 Two things worth repeating from the package README, because both were found here and neither is
 visible from unit tests: Tpay answers `success` to a code that is not valid, and a refused code
 leaves the transaction reading `pending` with the refusal recorded only in `payments.attempts`.
+
+## The click-through shop
+
+`sklep.mts` serves the same Payload instance as `serwer.mts`, plus one HTML page (`sklep.html`):
+a catalogue of three demo products, a cart, and a checkout with a six digit BLIK field next to a
+"pay on the Tpay page" button. Run it **instead of** `serwer.mts`, with the same environment
+variables; both listen on 8099.
+
+```bash
+node --import tsx sklep.mts          # then open http://127.0.0.1:8099/
+```
+
+Everything the page does beyond forwarding `/api/*` is shop logic, and deliberately the logic the
+package README says a shop must write itself: it remembers the transaction id across the redirect,
+calls `confirm-order` at most once per transaction (a reload of the return page is refused, because
+the plugin decrements stock on every call), and after a BLIK payment decrements stock once itself
+(`/sklep/zdejmij-stan`), since the BLIK path never reaches the plugin's decrement. The right hand
+panel shows what happened in the database after each step, read through the local API.
+
+The products collection gets a `title` field through `productsCollectionOverride` in
+`payload.config.ts`, because the plugin's default collection has no name field at all. The redirect
+path must be started under the public tunnel address, since Tpay returns the browser there and
+`sessionStorage` is per origin; the page offers to jump there when you pick that method locally.

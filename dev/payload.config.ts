@@ -71,7 +71,15 @@ export default buildConfig({
       // Pominiecie pola nie wylacza produktow po cichu - wywraca CALA inicjalizacje
       // Payloada bledem `InvalidFieldRelationship: ... has invalid relationship
       // 'products'`, bo koszyk i tak trzyma relacje do nieistniejacej kolekcji.
-      products: true,
+      // Domyslna kolekcja produktow wtyczki nie ma zadnej nazwy (kolumny: cena, stan,
+      // warianty, status) - sklep demo potrzebuje tytulu, wiec dokladamy jedno pole
+      // tak, jak zrobi to kazdy prawdziwy sklep: przez productsCollectionOverride.
+      products: {
+        productsCollectionOverride: ({ defaultCollection }) => ({
+          ...defaultCollection,
+          fields: [...defaultCollection.fields, { name: 'title', type: 'text' }],
+        }),
+      },
     }),
   ],
   secret: process.env.PAYLOAD_SECRET || 'gospodarz-deweloperski-nie-produkcja',

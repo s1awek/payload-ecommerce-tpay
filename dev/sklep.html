@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sklep demo · adapter Tpay dla Payload</title>
+<style>
+  :root {
+    --tlo: #f6f4ef; --karta: #ffffff; --tekst: #1d1c1a; --szary: #6b6660; --linia: #e4e0d8;
+    --akcent: #0f5f4a; --akcent-tlo: #e3f1ec; --ostrz: #9a4b12; --ostrz-tlo: #fbecdf; --blad: #a82525; --blad-tlo: #fbe5e5;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--tlo); color: var(--tekst); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--linia); background: var(--karta); }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: .01em; }
+  header h1 small { color: var(--szary); font-weight: 400; font-size: 14px; margin-left: 10px; }
+  header button { background: none; border: 1px solid var(--linia); border-radius: 999px; padding: 6px 14px; cursor: pointer; font: inherit; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+  .siatka { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .produkt { background: var(--karta); border: 1px solid var(--linia); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+  .produkt .obraz { aspect-ratio: 4/3; border-radius: 8px; background: repeating-linear-gradient(135deg, #dfe8e3 0 6px, #eef3f0 6px 14px); }
+  .produkt h3 { margin: 0; font-size: 17px; font-weight: 600; }
+  .produkt .cena { font-size: 18px; }
+  .produkt .stan { color: var(--szary); font-size: 13px; }
+  .przycisk { background: var(--akcent); color: #fff; border: 0; border-radius: 8px; padding: 11px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+  .przycisk.drugi { background: #fff; color: var(--tekst); border: 1px solid var(--linia); }
+  .przycisk:disabled { opacity: .5; cursor: default; }
+  .panel { background: var(--karta); border: 1px solid var(--linia); border-radius: 12px; padding: 22px; }
+  .dwie { display: grid; grid-template-columns: 1.2fr .8fr; gap: 20px; }
+  @media (max-width: 760px) { .dwie { grid-template-columns: 1fr; } }
+  h2 { margin: 0 0 14px; font-size: 20px; }
+  label { display: block; font-size: 13px; color: var(--szary); margin: 12px 0 4px; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid var(--linia); border-radius: 8px; font: inherit; background: #fff; }
+  input.blik { font-size: 30px; letter-spacing: .35em; text-align: center; font-variant-numeric: tabular-nums; }
+  .pozycja { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--linia); }
+  .suma { display: flex; justify-content: space-between; font-weight: 700; font-size: 18px; padding-top: 10px; }
+  .metody { display: grid; gap: 12px; margin-top: 18px; }
+  .metoda { border: 1px solid var(--linia); border-radius: 10px; padding: 14px; }
+  .metoda h4 { margin: 0 0 6px; font-size: 15px; }
+  .metoda p { margin: 0 0 10px; color: var(--szary); font-size: 14px; }
+  .wiersz { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .status { border-radius: 10px; padding: 14px 16px; margin: 14px 0; }
+  .status.ok { background: var(--akcent-tlo); color: var(--akcent); }
+  .status.czekam { background: #eef1f6; color: #2d3e5e; }
+  .status.uwaga { background: var(--ostrz-tlo); color: var(--ostrz); }
+  .status.blad { background: var(--blad-tlo); color: var(--blad); }
+  .kropki::after { content: ''; animation: kropki 1.2s steps(4) infinite; }
+  @keyframes kropki { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
+  .baza { font-size: 13px; color: var(--szary); }
+  .baza table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .baza td { padding: 5px 0; border-bottom: 1px solid var(--linia); vertical-align: top; }
+  .baza td:first-child { color: var(--tekst); width: 45%; }
+  .baza .zmiana { color: var(--ostrz); font-weight: 600; }
+  .maly { font-size: 13px; color: var(--szary); }
+  code { background: #f0ede6; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  .pusty { color: var(--szary); text-align: center; padding: 40px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sklep demo <small>Payload 3 + plugin-ecommerce + adapter Tpay (piaskownica)</small></h1>
+  <button id="btn-koszyk" onclick="pokaz('kasa')">Koszyk: <span id="licznik">0</span></button>
+</header>
+
+<main>
+  <!-- KATALOG -->
+  <section id="widok-katalog">
+    <div id="siatka" class="siatka"></div>
+  </section>
+
+  <!-- KASA -->
+  <section id="widok-kasa" hidden>
+    <div class="dwie">
+      <div class="panel">
+        <h2>Kasa</h2>
+        <div id="pozycje"></div>
+        <div class="suma"><span>Razem</span><span id="suma"></span></div>
+
+        <label>E-mail</label><input id="f-email" value="kupujacy@example.invalid">
+        <div class="wiersz">
+          <div style="flex:1"><label>Imię</label><input id="f-imie" value="Jan"></div>
+          <div style="flex:1"><label>Nazwisko</label><input id="f-nazwisko" value="Próbny"></div>
+        </div>
+        <div class="wiersz">
+          <div style="flex:2"><label>Miasto</label><input id="f-miasto" value="Warszawa"></div>
+          <div style="flex:1"><label>Kod pocztowy</label><input id="f-kod" value="00-001"></div>
+        </div>
+
+        <div class="metody">
+          <div class="metoda">
+            <h4>BLIK: wpisz kod tutaj, bez wychodzenia ze sklepu</h4>
+            <p>Sześć cyfr z aplikacji banku. W piaskownicy: <code>777123</code> przechodzi, <code>000000</code> zostaje odrzucony.</p>
+            <input id="blik" class="blik" inputmode="numeric" maxlength="7" placeholder="000 000" autocomplete="off">
+            <div class="wiersz" style="margin-top:10px">
+              <button class="przycisk" id="btn-blik" onclick="zaplacBlikiem()">Zapłać BLIK-iem</button>
+            </div>
+          </div>
+          <div class="metoda">
+            <h4>Inna metoda: przelew, karta, BLIK na stronie Tpay</h4>
+            <p>Przekierowanie na stronę Tpay i powrót do sklepu. Ta ścieżka wymaga publicznego tunelu (powiadomienie serwer-serwer).</p>
+            <button class="przycisk drugi" id="btn-tpay" onclick="zaplacNaTpay()">Zapłać na stronie Tpay</button>
+          </div>
+        </div>
+        <p class="maly" style="margin-top:16px"><a href="#" onclick="pokaz('katalog');return false">← wróć do katalogu</a></p>
+      </div>
+
+      <div class="panel baza">
+        <h2 style="font-size:16px">Co się dzieje pod spodem</h2>
+        <div id="log" class="maly">Jeszcze nic. Koszyk powstaje dopiero przy płatności.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PŁATNOŚĆ / WYNIK -->
+  <section id="widok-platnosc" hidden>
+    <div class="dwie">
+      <div class="panel">
+        <h2 id="p-tytul">Płatność</h2>
+        <div id="p-status"></div>
+        <div id="p-ponow" hidden>
+          <label>Nowy kod BLIK do tej samej płatności</label>
+          <input id="blik2" class="blik" inputmode="numeric" maxlength="7" placeholder="000 000" autocomplete="off">
+          <div class="wiersz" style="margin-top:10px">
+            <button class="przycisk" id="btn-blik2" onclick="ponowBlik()">Wyślij nowy kod</button>
+            <span class="maly">Koszyk i transakcja zostają te same, nie powstaje drugie zamówienie.</span>
+          </div>
+        </div>
+        <div id="p-koniec" hidden class="wiersz" style="margin-top:16px">
+          <button class="przycisk drugi" onclick="nowyZakup()">Nowy zakup</button>
+        </div>
+      </div>
+      <div class="panel baza">
+        <h2 style="font-size:16px">Co się stało w bazie</h2>
+        <div id="baza">Czekam na dane…</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// ---------- stan sklepu (po stronie przeglądarki) ----------
+const API = '/api/payments/tpay';
+let produkty = [];
+let koszyk = JSON.parse(sessionStorage.getItem('koszyk') || '{}');   // {idProduktu: ilość}
+let platnosc = null;                                                 // {transactionID, secret, cartID}
+let stanPrzed = null;                                                // stany magazynowe przed płatnością
+let odpytywanie = null;
+
+const zl = (grosze) => (grosze / 100).toLocaleString('pl-PL', { style: 'currency', currency: 'PLN' });
+const $ = (id) => document.getElementById(id);
+const zapiszKoszyk = () => { sessionStorage.setItem('koszyk', JSON.stringify(koszyk)); $('licznik').textContent = Object.values(koszyk).reduce((a, b) => a + b, 0); };
+const post = async (url, body) => { const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch {} return { status: r.status, body: j }; };
+const logLinia = (t) => { const el = $('log'); if (el.textContent.startsWith('Jeszcze nic')) el.textContent = ''; const d = document.createElement('div'); d.textContent = new Date().toLocaleTimeString('pl-PL') + '  ' + t; el.appendChild(d); };
+
+function pokaz(nazwa) {
+  for (const w of ['katalog', 'kasa', 'platnosc']) $('widok-' + w).hidden = w !== nazwa;
+  if (nazwa === 'kasa') rysujKase();
+}
+
+// ---------- katalog ----------
+async function wczytajProdukty() {
+  const r = await fetch('/sklep/produkty'); produkty = (await r.json()).produkty;
+  const s = $('siatka'); s.innerHTML = '';
+  if (!produkty.length) { s.innerHTML = '<p class="pusty">Brak produktów demo.</p>'; return; }
+  for (const p of produkty) {
+    const el = document.createElement('div'); el.className = 'produkt';
+    el.innerHTML = `<div class="obraz"></div><h3>${p.title.replace(/^Demo: /, '')}</h3>
+      <div class="cena">${zl(p.cena)}</div><div class="stan">w magazynie: ${p.stan}</div>
+      <button class="przycisk" ${p.stan <= 0 ? 'disabled' : ''} onclick="dodaj(${p.id})">Do koszyka</button>`;
+    s.appendChild(el);
+  }
+}
+function dodaj(id) { koszyk[id] = (koszyk[id] || 0) + 1; zapiszKoszyk(); pokaz('kasa'); }
+function usun(id) { delete koszyk[id]; zapiszKoszyk(); rysujKase(); }
+
+// ---------- kasa ----------
+function rysujKase() {
+  const el = $('pozycje'); el.innerHTML = ''; let suma = 0;
+  for (const [id, ilosc] of Object.entries(koszyk)) {
+    const p = produkty.find((x) => String(x.id) === String(id)); if (!p) continue;
+    suma += p.cena * ilosc;
+    const d = document.createElement('div'); d.className = 'pozycja';
+    d.innerHTML = `<span>${p.title.replace(/^Demo: /, '')} × ${ilosc}</span><span>${zl(p.cena * ilosc)} <a href="#" onclick="usun(${id});return false" class="maly">usuń</a></span>`;
+    el.appendChild(d);
+  }
+  if (!el.children.length) el.innerHTML = '<p class="pusty">Koszyk jest pusty.</p>';
+  $('suma').textContent = zl(suma);
+  $('btn-blik').disabled = $('btn-tpay').disabled = suma === 0;
+}
+
+const daneKupujacego = () => ({
+  customerEmail: $('f-email').value.trim(),
+  billingAddress: { firstName: $('f-imie').value.trim(), lastName: $('f-nazwisko').value.trim(), city: $('f-miasto').value.trim(), postalCode: $('f-kod').value.trim(), country: 'PL' },
+});
+
+/** Koszyk w Payloadzie + initiate przez endpoint wtyczki. Wspólne dla obu metod. */
+async function zalozPlatnosc() {
+  const items = Object.entries(koszyk).map(([product, quantity]) => ({ product: Number(product), quantity }));
+  stanPrzed = Object.fromEntries(produkty.map((p) => [p.id, p.stan]));
+  const k = await post('/sklep/koszyk', { items });
+  if (k.status !== 200) throw new Error('koszyk: ' + (k.body?.message || k.status));
+  logLinia(`koszyk #${k.body.id} utworzony, ${zl(k.body.subtotal)}`);
+  const init = await post(`${API}/initiate`, { ...daneKupujacego(), cartID: k.body.id, secret: k.body.secret });
+  if (init.status !== 200 || !init.body?.transactionID) throw new Error('initiate: ' + (init.body?.message || init.status));
+  logLinia(`initiate -> transakcja #${init.body.transactionID} (Tpay zwrócił adres płatności)`);
+  platnosc = { transactionID: init.body.transactionID, secret: k.body.secret, cartID: k.body.id, paymentUrl: init.body.paymentUrl };
+  sessionStorage.setItem('platnosc', JSON.stringify(platnosc));
+  return platnosc;
+}
+
+// ---------- BLIK 0 ----------
+async function zaplacBlikiem() {
+  const kod = $('blik').value.replace(/[\s-]/g, '');
+  if (!/^\d{6}$/.test(kod)) { $('blik').focus(); $('blik').style.borderColor = 'var(--blad)'; return; }
+  $('btn-blik').disabled = true;
+  try {
+    await zalozPlatnosc();
+    pokaz('platnosc'); $('p-tytul').textContent = 'Płatność BLIK';
+    await wyslijKod(kod);
+  } catch (e) { pokaz('platnosc'); ustawStatus('blad', 'Nie udało się założyć płatności: ' + e.message); $('p-koniec').hidden = false; }
+  finally { $('btn-blik').disabled = false; }
+}
+
+async function wyslijKod(kod) {
+  ustawStatus('czekam', '<b>Kod wysłany.</b> Potwierdź płatność w aplikacji banku<span class="kropki"></span><br><span class="maly">Nic się nie przekierowuje. Sklep pyta o stan co 2 sekundy.</span>');
+  $('p-ponow').hidden = true;
+  const r = await post(`${API}/blik`, { transactionID: platnosc.transactionID, secret: platnosc.secret, blikToken: kod });
+  if (r.status !== 200) { ustawStatus('blad', 'Kod nie został przyjęty: ' + (r.body?.message || r.status)); $('p-ponow').hidden = false; return; }
+  odswiezBaze();
+  odpytuj();
+}
+
+function odpytuj() {
+  clearInterval(odpytywanie);
+  odpytywanie = setInterval(async () => {
+    const r = await post(`${API}/blik-status`, { transactionID: platnosc.transactionID, secret: platnosc.secret });
+    const s = r.body?.status;
+    if (s === 'paid') {
+      clearInterval(odpytywanie);
+      // Ścieżka BLIK nie zdejmuje stanu magazynowego (patrz README pakietu). Sklep robi to sam, raz.
+      const z = await post('/sklep/zdejmij-stan', { transactionID: platnosc.transactionID, secret: platnosc.secret });
+      ustawStatus('ok', `<b>Zapłacono.</b> Zamówienie nr ${r.body.orderID} zostało utworzone.<br><span class="maly">Stan magazynowy: ${z.body?.zdjete ? 'zdjęty przez sklep po pierwszym odczycie „paid”' : 'nie zdjęty (' + (z.body?.powod || '?') + ')'}.</span>`);
+      zakoncz();
+    } else if (s === 'rejected') {
+      clearInterval(odpytywanie);
+      ustawStatus('uwaga', `<b>Bank odrzucił kod</b> (kod błędu Tpay: ${r.body.tpayErrorCode}). Płatność zostaje otwarta, wpisz nowy kod.`);
+      $('p-ponow').hidden = false; $('blik2').value = ''; $('blik2').focus();
+      odswiezBaze();
+    } else if (s === 'failed') {
+      clearInterval(odpytywanie);
+      ustawStatus('blad', `<b>Płatność nie powiodła się</b> (stan Tpay: ${r.body.tpayStatus}). Zacznij od nowa.`);
+      zakoncz();
+    } else if (r.status !== 200) {
+      clearInterval(odpytywanie);
+      ustawStatus('blad', 'Błąd odczytu stanu: ' + (r.body?.message || r.status));
+      zakoncz();
+    }
+  }, 2000);
+}
+
+async function ponowBlik() {
+  const kod = $('blik2').value.replace(/[\s-]/g, '');
+  if (!/^\d{6}$/.test(kod)) { $('blik2').focus(); return; }
+  await wyslijKod(kod);
+}
+
+// ---------- przekierowanie na Tpay ----------
+async function zaplacNaTpay() {
+  // Tpay odsyła kupującego na adres PUBLICZNY; sessionStorage jest per origin, więc ta ścieżka musi
+  // zacząć się pod tym samym adresem, pod który wróci. Pod 127.0.0.1 przeskakujemy na tunel.
+  const k = await (await fetch('/sklep/konfiguracja')).json();
+  if (k.adresPubliczny && location.origin !== k.adresPubliczny) {
+    if (confirm('Ta metoda wraca na adres publiczny ' + k.adresPubliczny + '. Otworzyć sklep pod tym adresem? Koszyk zostanie.')) {
+      location.href = k.adresPubliczny + '/?koszyk=' + encodeURIComponent(JSON.stringify(koszyk)) + '#kasa';
+    }
+    return;
+  }
+  $('btn-tpay').disabled = true;
+  try {
+    const p = await zalozPlatnosc();
+    if (!p.paymentUrl) throw new Error('brak adresu płatności w odpowiedzi initiate');
+    logLinia('przekierowanie na stronę Tpay…');
+    location.href = p.paymentUrl;
+  } catch (e) { alert('Nie udało się założyć płatności: ' + e.message); $('btn-tpay').disabled = false; }
+}
+
+/** Powrót ze strony Tpay: confirm-order dokładnie RAZ na transakcję (wtyczka zdejmuje stan przy każdym wywołaniu). */
+async function obsluzPowrot(sciezka) {
+  platnosc = JSON.parse(sessionStorage.getItem('platnosc') || 'null');
+  pokaz('platnosc'); $('p-tytul').textContent = 'Powrót ze strony Tpay';
+  if (!platnosc) { ustawStatus('blad', 'Brak zapamiętanej płatności w tej karcie przeglądarki.'); zakoncz(); return; }
+  if (sciezka === '/blad') { ustawStatus('blad', '<b>Płatność nieudana albo przerwana.</b> Tpay odesłał na adres błędu.'); zakoncz(); return; }
+  const klucz = 'potwierdzone:' + platnosc.transactionID;
+  if (sessionStorage.getItem(klucz)) {
+    ustawStatus('uwaga', '<b>Strona powrotu odświeżona.</b> confirm-order nie jest wołany drugi raz (chroni stan magazynowy przed podwójnym zdjęciem). Poniżej stan z bazy.');
+    zakoncz(); return;
+  }
+  ustawStatus('czekam', 'Sprawdzam stan płatności w Tpay<span class="kropki"></span>');
+  sessionStorage.setItem(klucz, '1');
+  const r = await post(`${API}/confirm-order`, { customerEmail: $('f-email').value.trim() || 'kupujacy@example.invalid', transactionID: platnosc.transactionID });
+  if (r.status === 200) ustawStatus('ok', `<b>Zapłacono.</b> ${r.body?.message || ''} Zamówienie nr ${r.body?.orderID ?? '(patrz baza)'}.`);
+  else ustawStatus('blad', `confirm-order odpowiedział ${r.status}: ${r.body?.message || ''}`);
+  zakoncz();
+}
+
+// ---------- wspólne ----------
+function ustawStatus(typ, htmlTresc) { $('p-status').innerHTML = `<div class="status ${typ}">${htmlTresc}</div>`; }
+function zakoncz() { $('p-koniec').hidden = false; odswiezBaze(); koszyk = {}; zapiszKoszyk(); }
+function nowyZakup() { platnosc = null; sessionStorage.removeItem('platnosc'); history.replaceState(null, '', '/'); wczytajProdukty().then(() => pokaz('katalog')); }
+
+async function odswiezBaze() {
+  if (!platnosc) return;
+  const r = await fetch('/sklep/stan?t=' + platnosc.transactionID); const s = await r.json();
+  const t = s.transakcja, z = s.zamowienie;
+  const wiersze = [
+    ['transakcja #' + t.id, `status <b>${t.status}</b>, ${zl(t.kwota)} ${t.waluta}, id Tpay ${t.tpayId || '-'}`],
+    ['zamówienie', z ? `#${z.id}, status <b>${z.status}</b>, ${zl(z.kwota)}` : '<i>jeszcze nie ma</i>'],
+    ['koszyk', s.koszyk ? `#${s.koszyk.id}, ${s.koszyk.kupiony ? 'oznaczony jako kupiony' : 'otwarty'}` : '-'],
+  ];
+  for (const p of s.produkty) {
+    const przed = stanPrzed?.[p.id];
+    const zmiana = przed != null && przed !== p.stan ? ` <span class="zmiana">(było ${przed})</span>` : '';
+    wiersze.push([p.title.replace(/^Demo: /, ''), `stan magazynowy ${p.stan}${zmiana}`]);
+  }
+  $('baza').innerHTML = '<table>' + wiersze.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('') + '</table>' +
+    `<p style="margin:10px 0 0">Odczyt z SQLite gospodarza przez lokalne API Payloada, ${new Date().toLocaleTimeString('pl-PL')}.</p>`;
+}
+
+// ---------- start ----------
+$('blik').addEventListener('input', (e) => { e.target.style.borderColor = ''; const c = e.target.value.replace(/\D/g, '').slice(0, 6); e.target.value = c.length > 3 ? c.slice(0, 3) + ' ' + c.slice(3) : c; });
+$('blik2').addEventListener('input', (e) => { const c = e.target.value.replace(/\D/g, '').slice(0, 6); e.target.value = c.length > 3 ? c.slice(0, 3) + ' ' + c.slice(3) : c; });
+const koszykZUrl = new URLSearchParams(location.search).get('koszyk');
+if (koszykZUrl) { try { koszyk = JSON.parse(koszykZUrl); } catch {} history.replaceState(null, '', '/'); }
+zapiszKoszyk();
+wczytajProdukty().then(() => {
+  if (koszykZUrl) { pokaz('kasa'); return; }
+  if (location.pathname === '/powrot' || location.pathname === '/blad') { stanPrzed = JSON.parse(sessionStorage.getItem('stanPrzed') || 'null'); obsluzPowrot(location.pathname); }
+  else pokaz('katalog');
+});
+// stan magazynowy „przed” musi przeżyć przekierowanie na Tpay
+const _zaloz = zalozPlatnosc; zalozPlatnosc = async function () { const p = await _zaloz(); sessionStorage.setItem('stanPrzed', JSON.stringify(stanPrzed)); return p; };
+</script>
+</body>
+</html>
