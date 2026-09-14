@@ -1,6 +1,6 @@
 import type { PayloadRequest } from 'payload'
 
-import { assertTransactionAccess } from './blik.js'
+import { assertTransactionAccess, BlikError } from './blik.js'
 import type { TpayClient } from './client.js'
 import { finalizeOrder, markTransactionStatus } from './finalize.js'
 import { assertRemoteMatchesTransaction } from './remote.js'
@@ -123,7 +123,12 @@ export const confirmOrder =
       const transaction = results.docs[0] as AnyDoc | undefined
 
       if (!transaction) {
-        throw new Error('No transaction found for the provided identifier.')
+        // The same answer `assertTransactionAccess` gives below, word for word.
+        // Transaction identifiers are consecutive integers, so two different
+        // messages would turn this endpoint into an oracle telling a stranger
+        // which identifiers exist - and the answer a caller is entitled to is
+        // the same in both cases: not yours.
+        throw new BlikError('You are not allowed to access this payment.', 403)
       }
 
       // The local `find` bypasses Payload's access control, and transaction
@@ -223,6 +228,13 @@ export const confirmOrder =
       }
     } catch (error) {
       payload.logger.error({ err: error, msg: 'Error confirming order with Tpay' })
+
+      // A refusal already decided here keeps its status code; anything else is
+      // flattened to a plain error so that Tpay API paths and status codes stay
+      // in the log rather than travelling to the browser.
+      if (error instanceof BlikError) {
+        throw error
+      }
 
       throw new Error(
         error instanceof Error ? error.message : 'Unknown error confirming an order with Tpay',

@@ -79,14 +79,30 @@ export const assertTransactionAccess = async (args: {
   const cartID = typeof transaction.cart === 'object' ? transaction.cart?.id : transaction.cart
 
   if (cartID && typeof secret === 'string' && secret.length > 0) {
-    const cart = (await req.payload.findByID({
-      id: cartID,
-      collection: cartsSlug,
-      depth: 0,
-      overrideAccess: true,
-      req,
-      select: { secret: true },
-    })) as AnyDoc | undefined
+    let cart: AnyDoc | undefined
+
+    try {
+      cart = (await req.payload.findByID({
+        id: cartID,
+        collection: cartsSlug,
+        depth: 0,
+        overrideAccess: true,
+        req,
+        select: { secret: true },
+      })) as AnyDoc | undefined
+    } catch (error) {
+      // Payload throws NotFound when the cart has been deleted, and a cart that
+      // is gone is the ordinary case here: the shop cleans old carts up, or the
+      // identifier on the transaction points at nothing any more. A caller who
+      // cannot prove the payment is theirs gets the same 403 as everyone else
+      // rather than a 500 with a stack trace behind it.
+      req.payload.logger.warn({
+        err: error,
+        msg: `Tpay: cart ${String(cartID)} could not be read while checking access to a payment, refusing the request`,
+      })
+
+      cart = undefined
+    }
 
     // A constant-time comparison is not needed here: the secret is random and
     // long, and every attempt requires a separate network request.

@@ -124,8 +124,52 @@ describe('order confirmation after the payer returns', () => {
 
     await assert.rejects(
       confirmOrder({ client })({ data: { transactionID: 'missing' }, req: makeReq(payload) }),
-      /No transaction found/,
+      /not allowed/,
     )
+  })
+
+  it('W2-10: an unknown transaction and somebody else\'s transaction give the same answer', async () => {
+    const payload = new PayloadStub()
+    seed(payload)
+    const { client } = clientReturning('correct')
+
+    const messages = []
+
+    for (const data of [{ transactionID: 'transactions-404' }, { transactionID: 'transactions-1' }]) {
+      await confirmOrder({ client })({ data, req: makeReq(payload) }).then(
+        () => assert.fail('the confirmation should have been refused'),
+        (error) => messages.push({ message: error.message, status: error.status }),
+      )
+    }
+
+    // Identifiers are consecutive integers. Two different messages would let a
+    // stranger walk the range and learn which transactions exist.
+    assert.equal(messages[0].message, messages[1].message)
+    assert.equal(messages[0].status, 403)
+    assert.equal(messages[1].status, 403)
+  })
+
+  it('W2-11: a deleted cart is a refusal, not a crash', async () => {
+    const payload = new PayloadStub()
+    seed(payload)
+    // The transaction points at a cart that no longer exists, which is what a
+    // shop cleaning up old carts leaves behind.
+    payload.collection('carts').clear()
+    const { calls, client } = clientReturning('correct')
+
+    await confirmOrder({ client })({
+      data: { secret: SECRET, transactionID: 'transactions-1' },
+      req: makeReq(payload),
+    }).then(
+      () => assert.fail('the confirmation should have been refused'),
+      (error) => {
+        assert.match(error.message, /not allowed/)
+        assert.equal(error.status, 403, 'a missing cart must not become a 500')
+      },
+    )
+
+    assert.deepEqual(calls, [], 'and Tpay is not asked anything')
+    assert.equal(payload.docs('orders').length, 0)
   })
 
   // --- audit 11.09.2026: access gates and identity of the payment proof ---
