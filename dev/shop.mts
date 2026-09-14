@@ -19,6 +19,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createPayloadRequest, getPayload } from 'payload'
 import config from './payload.config.js'
+import { notificationSummary, redactSecrets } from './log-redact.mjs'
 
 const PORT = Number(process.env.PORT || 8099)
 const dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -216,19 +217,22 @@ const forwardToApi = async (nodeReq: http.IncomingMessage, nodeRes: http.ServerR
   })
   log(nodeReq.method, route, `(body ${body?.length ?? 0} B)`)
   if (route.includes('notifications') && body?.length) {
-    // Only the id and whether a signature was present go into the log. The full
-    // body (with `md5sum`) is material for offline security code cracking - the
-    // same thing `.gitignore` excludes from the repository; it has no business
-    // going into dev/*.log.
-    const params = new URLSearchParams(body.toString('utf8'))
-    log('NOTIFICATION tr_id=', params.get('tr_id') || '(none)', 'tr_status=', params.get('tr_status') || '(none)', 'X-JWS-Signature:', headers.has('x-jws-signature') ? 'present' : 'MISSING')
+    // The transaction, what the message claims happened, the NAMES of the
+    // fields it carried, and whether it was signed. Never the body: `md5sum` is
+    // what an offline attack on the security code starts from - the same thing
+    // `.gitignore` keeps out of the repository, and it has no business going
+    // into dev/*.log either.
+    log('NOTIFICATION', notificationSummary(body.toString('utf8'), { signed: headers.has('x-jws-signature') }))
   }
   const payloadReq = await createPayloadRequest({ config: sanitized, request })
   const response = await endpoint.handler(payloadReq)
   const text = await response.text()
   const responseHeaders: Record<string, string> = {}
   response.headers.forEach((v, k) => (responseHeaders[k] = v))
-  log('->', response.status, text.slice(0, 300))
+  // The answers from `/api/*` carry an order's `accessToken` and a guest cart's
+  // `secret`; a log file is not the place for either. Redaction runs before the
+  // cut, so half a secret cannot survive it.
+  log('->', response.status, redactSecrets(text).slice(0, 300))
   nodeRes.writeHead(response.status, responseHeaders)
   nodeRes.end(text)
 }

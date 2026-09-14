@@ -11,6 +11,7 @@
 import http from 'node:http'
 import { createPayloadRequest, getPayload } from 'payload'
 import config from './payload.config.js'
+import { notificationSummary, redactSecrets } from './log-redact.mjs'
 
 const PORT = Number(process.env.PORT || 8099)
 
@@ -116,8 +117,14 @@ const server = http.createServer(async (nodeReq, nodeRes) => {
 
     console.log(`${stamp} ${nodeReq.method} ${route} (body ${body?.length ?? 0} B)`)
     if (route.includes('notifications') && body?.length) {
-      console.log(`${stamp} NOTIFICATION BODY: ${body.toString('utf8')}`)
-      console.log(`${stamp} X-JWS-Signature: ${headers.get('x-jws-signature') || '(none)'}`)
+      // Field names and the two fields worth reading, never the body itself:
+      // it carries `md5sum`, which is what an offline attack on the security
+      // code starts from. Same reasoning as in `shop.mts`.
+      console.log(
+        `${stamp} NOTIFICATION ${notificationSummary(body.toString('utf8'), {
+          signed: headers.has('x-jws-signature'),
+        })}`,
+      )
     }
 
     const payloadReq = await createPayloadRequest({ config: sanitized, request })
@@ -127,7 +134,9 @@ const server = http.createServer(async (nodeReq, nodeRes) => {
     const responseHeaders: Record<string, string> = {}
     response.headers.forEach((v, k) => (responseHeaders[k] = v))
 
-    console.log(`${stamp} -> ${response.status} ${text.slice(0, 300)}`)
+    // Redact first, then cut: cutting first could leave half of a secret in
+    // the log with nothing to match on.
+    console.log(`${stamp} -> ${response.status} ${redactSecrets(text).slice(0, 300)}`)
     nodeRes.writeHead(response.status, responseHeaders)
     nodeRes.end(text)
   } catch (error) {
