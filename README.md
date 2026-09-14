@@ -77,6 +77,10 @@ const paymentMethods = [tpayAdapterClient({ label: 'BLIK, transfer, card' })]
 | `TPAY_SANDBOX` | `true` routes every call to the sandbox API |
 | `NEXT_PUBLIC_SERVER_URL` | Used to derive the notification URL when you do not set one |
 
+### Timeouts
+
+Every call to the Tpay API carries a deadline of 15 seconds, and the certificate fetch behind JWS verification carries a shorter one of 5 seconds, because that request runs while a notification is waiting for its answer. A provider that accepts a connection and then goes quiet would otherwise hold a checkout request, or a BLIK status poll, open for as long as your host allows. Change the API ceiling with `timeoutMs` on the adapter; `timeoutMs: 0` turns it off and leaves only your host's own limits.
+
 ### Notification URL
 
 The adapter mounts an endpoint at:

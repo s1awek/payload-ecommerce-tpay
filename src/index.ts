@@ -48,7 +48,12 @@ export const tpayAdapter = (props: TpayAdapterArgs = {}): PaymentAdapter => {
     )
   }
 
-  const client = new TpayClient({ clientId, clientSecret, sandbox })
+  const client = new TpayClient({
+    clientId,
+    clientSecret,
+    sandbox,
+    ...(props.timeoutMs === undefined ? {} : { timeoutMs: props.timeoutMs }),
+  })
 
   const resolved: TpayAdapterArgs & { client: TpayClient } = {
     ...props,

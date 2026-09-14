@@ -19,6 +19,14 @@ export type TpayClientOptions = {
   /** Margin for refreshing the token before it expires, in seconds. */
   refreshMarginSeconds?: number
   sandbox?: boolean
+  /**
+   * Ceiling on a single request to Tpay, in milliseconds. Defaults to 15000.
+   * Without it a provider that accepts the connection and then says nothing
+   * holds a checkout request open for as long as the host allows, and BLIK
+   * status polling turns that into a pile of stuck requests. `0` turns the
+   * timeout off, which means the host's own limits are the only ones left.
+   */
+  timeoutMs?: number
 }
 
 export type TpayPayer = {
@@ -95,10 +103,19 @@ export class TpayClient {
   private readonly clientSecret: string
   private readonly fetchImpl: typeof fetch
   private readonly refreshMarginSeconds: number
+  private readonly timeoutMs: number
   private token: null | { expiresAt: number; value: string } = null
 
   constructor(options: TpayClientOptions) {
-    const { baseUrl, clientId, clientSecret, fetchImpl, refreshMarginSeconds, sandbox } = options
+    const {
+      baseUrl,
+      clientId,
+      clientSecret,
+      fetchImpl,
+      refreshMarginSeconds,
+      sandbox,
+      timeoutMs,
+    } = options
 
     if (!clientId || !clientSecret) {
       throw new Error('Tpay clientId and clientSecret are required.')
@@ -109,6 +126,20 @@ export class TpayClient {
     this.clientSecret = clientSecret
     this.fetchImpl = fetchImpl || globalThis.fetch
     this.refreshMarginSeconds = refreshMarginSeconds ?? 60
+    this.timeoutMs = Number.isFinite(Number(timeoutMs)) ? Number(timeoutMs) : 15_000
+  }
+
+  /**
+   * Abort signal for a single outgoing request. Every call to Tpay carries one:
+   * a socket that connects and then goes quiet would otherwise keep a checkout
+   * request, or a BLIK status poll, waiting for whatever the host permits.
+   */
+  private abortSignal(): AbortSignal | undefined {
+    if (!(this.timeoutMs > 0)) {
+      return undefined
+    }
+
+    return AbortSignal.timeout(this.timeoutMs)
   }
 
   /** Returns a valid token, taking it from memory or fetching a new one. */
@@ -127,6 +158,7 @@ export class TpayClient {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       method: 'POST',
+      signal: this.abortSignal(),
     })
 
     const body = (await this.readBody(response)) as { access_token?: string; expires_in?: number }
@@ -214,6 +246,9 @@ export class TpayClient {
           ...(payload === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         method,
+        // A fresh signal per attempt: the retry after a 401 is a new request and
+        // must not inherit a clock that has already been running.
+        signal: this.abortSignal(),
       })
 
     let response = await send(await this.getAccessToken())

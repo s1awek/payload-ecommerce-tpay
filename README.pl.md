@@ -78,6 +78,10 @@ const paymentMethods = [tpayAdapterClient({ label: 'BLIK, przelew, karta' })]
 | `TPAY_SANDBOX` | `true` kieruje wszystkie wywołania do API sandboksa |
 | `NEXT_PUBLIC_SERVER_URL` | Służy do zbudowania adresu powiadomień, gdy nie podasz go wprost |
 
+### Limity czasu
+
+Każde wywołanie API Tpay ma termin 15 sekund, a pobranie certyfikatu na potrzeby weryfikacji JWS krótszy, 5 sekund - ten request idzie, gdy powiadomienie czeka na odpowiedź. Dostawca, który przyjmie połączenie i zamilknie, trzymałby inaczej żądanie z kasy albo odpytanie o status BLIK tak długo, jak pozwoli hosting. Pułap dla API zmienia `timeoutMs` na adapterze; `timeoutMs: 0` wyłącza go i zostawia same limity hostingu.
+
 ### Adres powiadomień
 
 Adapter wystawia punkt:

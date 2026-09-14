@@ -48,6 +48,14 @@ export type TpayAdapterArgs = {
    */
   securityCode?: string
   /**
+   * Ceiling on a single request to the Tpay API, in milliseconds. Defaults to
+   * 15000; `0` turns it off. A provider that accepts the connection and then
+   * stops answering would otherwise hold a checkout request open for as long as
+   * the host allows. The certificate fetch used by JWS verification has its own,
+   * shorter ceiling, because it runs while a notification waits for an answer.
+   */
+  timeoutMs?: number
+  /**
    * Verification of the JWS signature (X-JWS-Signature header) alongside the
    * md5 checksum. Defaults to `true`; `false` turns it off explicitly. Requires
    * an outgoing connection to fetch the Tpay certificate. The md5 checksum

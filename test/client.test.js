@@ -11,7 +11,7 @@ const recorder = (responses) => {
   const queue = [...responses]
 
   const fetchImpl = async (url, init) => {
-    calls.push({ body: init?.body, headers: init?.headers, method: init?.method, url })
+    calls.push({ body: init?.body, headers: init?.headers, method: init?.method, signal: init?.signal, url })
     const next = queue.shift()
 
     if (!next) {
@@ -145,5 +145,69 @@ describe('Tpay client', () => {
     const client = new TpayClient({ clientId: 'id', clientSecret: 'wrong', fetchImpl })
 
     await assert.rejects(client.getAccessToken(), /authentication failed/)
+  })
+})
+
+// --- audit round 2, 14.09.2026: no outgoing request waits forever (W2-9) ---
+
+describe('W2-9: every request to Tpay carries a deadline', () => {
+  it('W2-9: the token request and the API request both get an abort signal', async () => {
+    const { calls, fetchImpl } = recorder([json(AUTH), json({ transactionId: 'TR' })])
+    const client = new TpayClient({ clientId: 'id', clientSecret: 'secret', fetchImpl })
+
+    await client.getTransaction('TR')
+
+    assert.equal(calls.length, 2)
+
+    for (const call of calls) {
+      assert.ok(call.signal instanceof AbortSignal, `${call.url} went out without a signal`)
+      assert.equal(call.signal.aborted, false)
+    }
+
+    assert.notEqual(calls[0].signal, calls[1].signal, 'each request gets its own clock')
+  })
+
+  it('W2-9: the retry after a 401 starts a new clock instead of inheriting one', async () => {
+    const { calls, fetchImpl } = recorder([
+      json(AUTH),
+      json({ message: 'expired' }, 401),
+      json({ access_token: 'token-2', expires_in: 7200 }),
+      json({ transactionId: 'TR' }),
+    ])
+    const client = new TpayClient({ clientId: 'id', clientSecret: 'secret', fetchImpl })
+
+    await client.getTransaction('TR')
+
+    const signals = calls.map((call) => call.signal)
+    assert.equal(signals.length, 4)
+    assert.equal(new Set(signals).size, 4, 'four requests, four signals')
+  })
+
+  it('W2-9: the ceiling is configurable, and zero turns it off deliberately', async () => {
+    const fast = recorder([json(AUTH), json({ transactionId: 'TR' })])
+    const client = new TpayClient({
+      clientId: 'id',
+      clientSecret: 'secret',
+      fetchImpl: fast.fetchImpl,
+      timeoutMs: 1,
+    })
+
+    await client.getTransaction('TR')
+    // The signal fires on its own clock; with a 1 ms ceiling it is aborted by
+    // the time the test gets to look at it, which is the whole point of it
+    // being there.
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    assert.equal(fast.calls[0].signal.aborted, true)
+
+    const off = recorder([json(AUTH), json({ transactionId: 'TR' })])
+    const noTimeout = new TpayClient({
+      clientId: 'id',
+      clientSecret: 'secret',
+      fetchImpl: off.fetchImpl,
+      timeoutMs: 0,
+    })
+
+    await noTimeout.getTransaction('TR')
+    assert.equal(off.calls[0].signal, undefined, 'switched off means no signal at all')
   })
 })

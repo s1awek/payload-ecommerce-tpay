@@ -131,6 +131,13 @@ export type JwsVerifyResult = {
 
 const certificateCache = new Map<string, { fetchedAt: number; pem: string }>()
 const CERT_CACHE_TTL_MS = 60 * 60 * 1000
+/**
+ * Ceiling on fetching the signing certificate. Shorter than the ceiling on API
+ * calls, because this request sits inside the handling of a notification: Tpay
+ * treats a notification as undelivered until it gets an answer and retries it,
+ * so waiting is worth less here than answering.
+ */
+const CERT_FETCH_TIMEOUT_MS = 5_000
 
 async function defaultFetchCertificate(url: string): Promise<string> {
   const cached = certificateCache.get(url)
@@ -139,7 +146,7 @@ async function defaultFetchCertificate(url: string): Promise<string> {
     return cached.pem
   }
 
-  const response = await fetch(url)
+  const response = await fetch(url, { signal: AbortSignal.timeout(CERT_FETCH_TIMEOUT_MS) })
 
   if (!response.ok) {
     throw new Error(`Certificate fetch failed with HTTP ${response.status}`)
