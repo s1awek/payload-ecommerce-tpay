@@ -248,16 +248,16 @@ function poll() {
       clearInterval(pollTimer);
       // The BLIK path does not decrement stock (see the package README). The shop does it itself, once.
       const z = await post('/shop/decrement-stock', { transactionID: payment.transactionID, secret: payment.secret });
-      setStatus('ok', `<b>Paid.</b> Order no. ${r.body.orderID} was created.<br><span class="small">Stock: ${z.body?.decremented ? 'decremented by the shop on the first "paid" read' : 'not decremented (' + (z.body?.reason || '?') + ')'}.</span>`);
+      setStatus('ok', `<b>Paid.</b> Order no. ${escapeHtml(r.body.orderID)} was created.<br><span class="small">Stock: ${z.body?.decremented ? 'decremented by the shop on the first "paid" read' : 'not decremented (' + escapeHtml(z.body?.reason || '?') + ')'}.</span>`);
       finish();
     } else if (s === 'rejected') {
       clearInterval(pollTimer);
-      setStatus('warn', `<b>The bank refused the code</b> (Tpay error code: ${r.body.tpayErrorCode}). The payment stays open, type a new code.`);
+      setStatus('warn', `<b>The bank refused the code</b> (Tpay error code: ${escapeHtml(r.body.tpayErrorCode)}). The payment stays open, type a new code.`);
       $('p-retry').hidden = false; $('blik2').value = ''; $('blik2').focus();
       refreshDb();
     } else if (s === 'failed') {
       clearInterval(pollTimer);
-      setStatus('error', `<b>Payment failed</b> (Tpay status: ${r.body.tpayStatus}). Start over.`);
+      setStatus('error', `<b>Payment failed</b> (Tpay status: ${escapeHtml(r.body.tpayStatus)}). Start over.`);
       finish();
     } else if (r.status !== 200) {
       clearInterval(pollTimer);
@@ -310,7 +310,7 @@ async function handleReturn(route) {
   sessionStorage.setItem(key, '1');
   // The plugin requires the cart and its secret (guest), the adapter takes transactionID; without cartID it answers 400 "Cart ID is required".
   const r = await post(`${API}/confirm-order`, { cartID: payment.cartID, secret: payment.secret, customerEmail: $('f-email').value.trim() || 'buyer@example.invalid', transactionID: payment.transactionID });
-  if (r.status === 200) setStatus('ok', `<b>Paid.</b> ${r.body?.message || ''} Order no. ${r.body?.orderID ?? '(see the database)'}.`);
+  if (r.status === 200) setStatus('ok', `<b>Paid.</b> ${escapeHtml(r.body?.message || '')} Order no. ${escapeHtml(r.body?.orderID ?? '(see the database)')}.`);
   else {
     // The buyer sees a fixed message; the response content goes to the console and to the server log.
     console.warn('confirm-order', r.status, r.body);
