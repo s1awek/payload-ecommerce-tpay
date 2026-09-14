@@ -237,6 +237,23 @@ describe('order confirmation after the payer returns', () => {
       /amount does not match/,
     )
   })
+
+  it('W2-3: a transaction in a currency with another minor unit cannot pass the amount gate', async () => {
+    const payload = new PayloadStub()
+    // 1999 minor units of a zero decimal currency is 1999 yen, but the outgoing
+    // side would have sent 19.99 and this gate used to scale the answer back by
+    // the same wrong power of ten and call it a match.
+    seed(payload, { currency: 'JPY' })
+    const { client } = clientReturning('correct', { amount: 19.99, currency: 'JPY' })
+
+    await assert.rejects(
+      confirmOrder({ client })({ data: { secret: SECRET, transactionID: 'transactions-1' }, req: makeReq(payload) }),
+      /two decimal currencies only/,
+    )
+
+    assert.equal(payload.docs('orders').length, 0)
+    assert.equal(payload.docs('transactions')[0].status, 'pending')
+  })
 })
 
 // --- audit round 2, 14.09.2026: the stock decrement trigger ---

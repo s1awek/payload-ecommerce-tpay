@@ -1,6 +1,7 @@
 import type { Endpoint, PayloadRequest } from 'payload'
 
 import { decimalStringToMinor } from '../amount.js'
+import { minorUnitDecimals, TPAY_CURRENCY_DECIMALS } from '../currencies.js'
 import { finalizeOrder, markTransactionStatus } from '../finalize.js'
 import type { TpayAdapterArgs } from '../types.js'
 import {
@@ -196,6 +197,20 @@ export const notificationsEndpoint = (
       // payment through, however small, on exactly those transactions.
       payload.logger.error(
         `Tpay: transaction ${String(transaction.id)} has an unusable amount ${JSON.stringify(transaction.amount)}, so the payment cannot be checked against it. Order not created.`,
+      )
+
+      return okResponse()
+    }
+
+    // The same table the outgoing side refuses on (`initiatePayment`) and the
+    // API side compares with (`assertRemoteMatchesTransaction`). A currency this
+    // package cannot represent in minor units must not slip through here just
+    // because this path does its own arithmetic.
+    const currencyDecimals = minorUnitDecimals(transaction.currency)
+
+    if (currencyDecimals !== TPAY_CURRENCY_DECIMALS) {
+      payload.logger.error(
+        `Tpay: transaction ${String(transaction.id)} is in ${String(transaction.currency)}, which has ${currencyDecimals} minor unit decimal places; this package settles in two decimal currencies only. Order not created.`,
       )
 
       return okResponse()

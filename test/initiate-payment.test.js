@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { isSupportedCurrency, minorUnitDecimals } from '../dist/currencies.js'
 import { buildPayer, flattenCartItems, initiatePayment } from '../dist/initiatePayment.js'
 import { makeReq, PayloadStub } from './helpers/payload-stub.js'
 
@@ -201,5 +202,66 @@ describe('payer data and cart items', () => {
       { deliveryOption: 'courier', product: 'p1', quantity: 2, variant: 'v1' },
       { product: 'p2', quantity: 1 },
     ])
+  })
+})
+
+// --- audit round 2, 14.09.2026: currencies whose minor unit is not two decimals ---
+//
+// Both ends of the trip used to hard-code two decimal places. For a currency
+// with a different exponent the outgoing conversion and the gate comparing the
+// amount that comes back make the SAME mistake, agree with each other, and let
+// through a payment worth a hundredth of the price. The package refuses such a
+// currency instead of guessing its exponent.
+
+describe('W2-3: the package settles two decimal currencies only', () => {
+  it('W2-3: a currency with a different minor unit is refused before any transaction exists', async () => {
+    const payload = new PayloadStub()
+    const { calls, client } = fakeClient()
+
+    const handler = initiatePayment({
+      client,
+      notificationUrl: 'https://sklep.example/api/payments/tpay/notifications',
+    })
+
+    await assert.rejects(
+      handler({
+        data: { billingAddress, cart, currency: 'JPY', customerEmail: 'anna@example.pl' },
+        req: makeReq(payload),
+        transactionsSlug: 'transactions',
+      }),
+      /two decimal currencies only/,
+    )
+
+    assert.equal(payload.docs('transactions').length, 0, 'nothing is written before the refusal')
+    assert.equal(calls.length, 0, 'and nothing is sent to Tpay')
+  })
+
+  it('W2-3: the refusal does not depend on the case of the code', async () => {
+    await assert.rejects(run({}, { currency: 'jpy' }), /two decimal currencies only/)
+    await assert.rejects(run({}, { currency: 'KWD' }), /two decimal currencies only/)
+  })
+
+  it('W2-3 known-good: PLN and EUR go through with the amount unchanged', async () => {
+    for (const currency of ['PLN', 'EUR', 'usd', 'GBP']) {
+      const { calls, payload } = await run({}, { currency })
+
+      assert.equal(calls[0].amount, 19.99, `${currency} keeps 1999 minor units as 19.99`)
+      assert.equal(calls[0].currency, currency.toUpperCase())
+      assert.equal(payload.docs('transactions')[0].amount, 1999)
+    }
+  })
+
+  it('W2-3: the table answers with the real ISO 4217 exponent, two by default', () => {
+    assert.equal(minorUnitDecimals('PLN'), 2)
+    assert.equal(minorUnitDecimals('eur'), 2)
+    assert.equal(minorUnitDecimals(' gbp '), 2)
+    assert.equal(minorUnitDecimals('JPY'), 0)
+    assert.equal(minorUnitDecimals('KWD'), 3)
+    assert.equal(minorUnitDecimals('CLF'), 4)
+    assert.equal(minorUnitDecimals(undefined), 2, 'an unknown code falls back to the standard default')
+
+    assert.equal(isSupportedCurrency('PLN'), true)
+    assert.equal(isSupportedCurrency('JPY'), false)
+    assert.equal(isSupportedCurrency('KWD'), false)
   })
 })

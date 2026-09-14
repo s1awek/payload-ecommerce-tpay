@@ -168,7 +168,12 @@ export {
   BlikError,
   normalizeBlikToken,
 } from './blik.js'
-export { PLN } from './currencies.js'
+export {
+  isSupportedCurrency,
+  minorUnitDecimals,
+  PLN,
+  TPAY_CURRENCY_DECIMALS,
+} from './currencies.js'
 export { finalizeOrder, markTransactionStatus, type FinalizeResult } from './finalize.js'
 export type { TpayAdapterArgs, TpayAdapterClientArgs } from './types.js'
 export {

@@ -2,17 +2,10 @@ import type { PayloadRequest } from 'payload'
 
 import { minorToDecimalString } from './amount.js'
 import { TpayClient, type TpayPayer, type TpayTransactionRequest } from './client.js'
+import { minorUnitDecimals, TPAY_CURRENCY_DECIMALS } from './currencies.js'
 import type { TpayAdapterArgs } from './types.js'
 
 type AnyDoc = Record<string, any>
-
-/**
- * Tpay settles in two-decimal currencies (PLN, EUR, USD, GBP), and the
- * ecommerce plugin keeps amounts in minor units. The constant is explicit here
- * so that, when a currency with a different number of decimal places is added,
- * it is clear where to look.
- */
-const CURRENCY_DECIMALS = 2
 
 export const buildPayer = (args: {
   billingAddress?: AnyDoc
@@ -83,6 +76,19 @@ export const initiatePayment =
       throw new Error('Currency is required.')
     }
 
+    const currencyCode = String(currency).toUpperCase()
+    const decimals = minorUnitDecimals(currencyCode)
+
+    // Refuse loudly instead of scaling by the wrong power of ten. The gate that
+    // compares the amount coming back from Tpay uses the same table, so a
+    // currency slipping through here could not be caught later either: both
+    // sides would be wrong by exactly the same factor and would agree.
+    if (decimals !== TPAY_CURRENCY_DECIMALS) {
+      throw new Error(
+        `Tpay settles in two decimal currencies only. ${currencyCode} has ${decimals} minor unit decimal places, so sending it would charge an amount wrong by a power of ten. Remove it from the plugin's supportedCurrencies.`,
+      )
+    }
+
     if (!cart || !cart.items || cart.items.length === 0) {
       throw new Error('Cart is empty or not provided.')
     }
@@ -114,7 +120,7 @@ export const initiatePayment =
         amount,
         billingAddress,
         cart: cart.id,
-        currency: String(currency).toUpperCase(),
+        currency: currencyCode,
         items,
         paymentMethod: 'tpay',
         status: 'pending',
@@ -127,7 +133,7 @@ export const initiatePayment =
 
     try {
       const request: TpayTransactionRequest = {
-        amount: Number(minorToDecimalString(amount, CURRENCY_DECIMALS)),
+        amount: Number(minorToDecimalString(amount, TPAY_CURRENCY_DECIMALS)),
         callbacks: {
           notification: { url: notificationUrl },
           ...(payerSuccessUrl || payerErrorUrl
@@ -139,7 +145,7 @@ export const initiatePayment =
               }
             : {}),
         },
-        currency: String(currency).toUpperCase(),
+        currency: currencyCode,
         description: `Order ${String(cart.id)}`,
         hiddenDescription: String(transaction.id),
         lang: lang || 'pl',

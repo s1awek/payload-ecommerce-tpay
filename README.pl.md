@@ -148,6 +148,8 @@ minorToDecimalString(1999) // '19.99'
 decimalStringToMinor('19.99') // 1999
 ```
 
+**Tylko waluty dwucyfrowe.** Każda konwersja zakłada tu jednostkę podrzędną o dwóch miejscach po przecinku - to domyślna wartość ISO 4217 i tak jest dla wszystkiego, co rozlicza Tpay (PLN, EUR, USD, GBP). Waluta o innym wykładniku - jen nie ma miejsc po przecinku, dinar kuwejcki ma trzy - zostaje odrzucona przez `initiatePayment` głośnym błędem, zamiast zostać przeliczona o rząd wielkości za nisko; ta sama tabela pilnuje kontroli na drodze powrotnej, więc taka waluta nie przejdzie przez bramkę kwoty dzięki temu, że obie strony pomyliły się tak samo. Usuń ją z `supportedCurrencies` wtyczki.
+
 ## Znane ograniczenia
 
 - **Stan magazynowy zdejmuje punkt `confirm-order` z wtyczki i tylko wtedy, gdy kupujący wróci.**

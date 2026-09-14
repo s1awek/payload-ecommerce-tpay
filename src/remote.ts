@@ -1,5 +1,6 @@
 import { apiAmountToMinor } from './amount.js'
 import type { TpayTransaction } from './client.js'
+import { minorUnitDecimals, TPAY_CURRENCY_DECIMALS } from './currencies.js'
 
 type AnyDoc = Record<string, any>
 
@@ -31,8 +32,21 @@ export const assertRemoteMatchesTransaction = (args: {
 }): void => {
   const { remote, transaction } = args
 
+  const expectedCurrency = String(transaction.currency ?? '').toUpperCase()
+
+  // The number of decimal places has to come from the same table `initiatePayment`
+  // refuses on, otherwise both ends of the trip scale by the same wrong power of
+  // ten and this gate reports a match on a payment worth a hundredth of the price.
+  const decimals = minorUnitDecimals(expectedCurrency)
+
+  if (decimals !== TPAY_CURRENCY_DECIMALS) {
+    throw new RemoteMismatchError(
+      `Transaction currency ${expectedCurrency || '(none)'} has ${decimals} minor unit decimal places; this package settles in two decimal currencies only, so the amount cannot be compared.`,
+    )
+  }
+
   const expectedMinor = Number(transaction.amount)
-  const remoteMinor = apiAmountToMinor(remote?.amount)
+  const remoteMinor = apiAmountToMinor(remote?.amount, decimals)
 
   if (!Number.isFinite(expectedMinor) || remoteMinor === undefined || remoteMinor !== expectedMinor) {
     throw new RemoteMismatchError(
@@ -40,7 +54,6 @@ export const assertRemoteMatchesTransaction = (args: {
     )
   }
 
-  const expectedCurrency = String(transaction.currency ?? '').toUpperCase()
   const remoteCurrency = String(remote?.currency ?? '').toUpperCase()
 
   if (!expectedCurrency || !remoteCurrency || expectedCurrency !== remoteCurrency) {

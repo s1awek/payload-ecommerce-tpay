@@ -305,4 +305,18 @@ describe('audit 11.09.2026: default values and resilience of the notification en
     assert.equal(payload.docs('transactions')[0].status, 'pending')
     assert.match(String(payload.logs.error[0]), /unreadable tr_paid/)
   })
+
+  it('W2-3: a transaction in a currency with another minor unit does not get an order', async () => {
+    const payload = new PayloadStub()
+    seed(payload, { currency: 'JPY' })
+
+    // tr_paid would compare equal to the stored 1999 minor units only because
+    // this path scaled it by the two decimal places it assumed for everything.
+    const response = await call(payload, body({ tr_paid: '19.99' }))
+
+    assert.equal(await response.text(), 'TRUE')
+    assert.equal(payload.docs('orders').length, 0)
+    assert.equal(payload.docs('transactions')[0].status, 'pending')
+    assert.match(String(payload.logs.error[0]), /two decimal currencies only/)
+  })
 })

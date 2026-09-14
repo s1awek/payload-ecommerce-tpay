@@ -147,6 +147,8 @@ minorToDecimalString(1999) // '19.99'
 decimalStringToMinor('19.99') // 1999
 ```
 
+**Two decimal currencies only.** Every conversion here assumes a minor unit of two decimal places, which is the ISO 4217 default and holds for everything Tpay settles (PLN, EUR, USD, GBP). A currency with a different exponent - JPY has none, KWD has three - is refused by `initiatePayment` with a loud error rather than converted by the wrong power of ten, and the same table guards the checks on the way back, so such a currency cannot pass the amount gate by both ends making the same mistake. Take it out of the plugin's `supportedCurrencies`.
+
 ## Known limitations
 
 - **Inventory is decremented by the plugin's `confirm-order` endpoint, and only when the buyer comes
