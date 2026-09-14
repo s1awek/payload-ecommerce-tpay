@@ -138,11 +138,16 @@
   </section>
 </main>
 
-<script>
+<script type="module">
+import { escapeHtml, parseCartParam } from '/shop/cart-param.mjs';
+
 // ---------- shop state (in the browser) ----------
 const API = '/api/payments/tpay';
 let products = [];
-let cart = JSON.parse(sessionStorage.getItem('cart') || '{}');   // {productId: quantity}
+// Everything that becomes the cart goes through the same gate, whether it comes
+// from a link (`?cart=`) or from this browser's own sessionStorage: keys are
+// product identifiers, values are integer quantities, anything else is dropped.
+let cart = parseCartParam(sessionStorage.getItem('cart') || '{}');   // {productId: quantity}
 let payment = null;                                              // {transactionID, secret, cartID}
 let stockBefore = null;                                          // stock levels before payment
 let pollTimer = null;
@@ -165,9 +170,9 @@ async function loadProducts() {
   if (!products.length) { s.innerHTML = '<p class="empty">No demo products.</p>'; return; }
   for (const p of products) {
     const el = document.createElement('div'); el.className = 'product';
-    el.innerHTML = `<div class="image"></div><h3>${p.title.replace(/^Demo: /, '')}</h3>
-      <div class="price">${money(p.price)}</div><div class="stock">in stock: ${p.stock}</div>
-      <button class="button" ${p.stock <= 0 ? 'disabled' : ''} onclick="addToCart(${p.id})">Add to cart</button>`;
+    el.innerHTML = `<div class="image"></div><h3>${escapeHtml(p.title.replace(/^Demo: /, ''))}</h3>
+      <div class="price">${escapeHtml(money(p.price))}</div><div class="stock">in stock: ${escapeHtml(p.stock)}</div>
+      <button class="button" ${p.stock <= 0 ? 'disabled' : ''} onclick="addToCart(${Number(p.id)})">Add to cart</button>`;
     s.appendChild(el);
   }
 }
@@ -181,7 +186,10 @@ function renderCheckout() {
     const p = products.find((x) => String(x.id) === String(id)); if (!p) continue;
     total += p.price * quantity;
     const d = document.createElement('div'); d.className = 'line-item';
-    d.innerHTML = `<span>${p.title.replace(/^Demo: /, '')} &times; ${quantity}</span><span>${money(p.price * quantity)} <a href="#" onclick="removeFromCart(${id});return false" class="small">remove</a></span>`;
+    // `quantity` and `id` come from a URL anyone can write. `parseCartParam` has
+    // already reduced them to numbers, and everything here is escaped on top of
+    // that, so neither a template nor an attribute can be broken out of.
+    d.innerHTML = `<span>${escapeHtml(p.title.replace(/^Demo: /, ''))} &times; ${escapeHtml(quantity)}</span><span>${escapeHtml(money(p.price * quantity))} <a href="#" onclick="removeFromCart(${Number(id)});return false" class="small">remove</a></span>`;
     el.appendChild(d);
   }
   if (!el.children.length) el.innerHTML = '<p class="empty">The cart is empty.</p>';
@@ -321,15 +329,17 @@ async function refreshDb() {
   const r = await post('/shop/state', { transactionID: payment.transactionID, secret: payment.secret }); const s = r.body;
   if (r.status !== 200 || !s) { $('db').innerHTML = '<p>No access to the state of this transaction.</p>'; return; }
   const t = s.transaction, z = s.order;
+  // The markup in these rows is ours; every value dropped into it is escaped,
+  // including the ones that come back from the API rather than from a URL.
   const rows = [
-    ['transaction #' + t.id, `status <b>${t.status}</b>, ${money(t.amount)} ${t.currency}, Tpay id ${t.tpayId || '-'}`],
-    ['order', z ? `#${z.id}, status <b>${z.status}</b>, ${money(z.amount)}` : '<i>not yet</i>'],
-    ['cart', s.cart ? `#${s.cart.id}, ${s.cart.purchased ? 'marked as purchased' : 'open'}` : '-'],
+    ['transaction #' + escapeHtml(t.id), `status <b>${escapeHtml(t.status)}</b>, ${escapeHtml(money(t.amount))} ${escapeHtml(t.currency)}, Tpay id ${escapeHtml(t.tpayId || '-')}`],
+    ['order', z ? `#${escapeHtml(z.id)}, status <b>${escapeHtml(z.status)}</b>, ${escapeHtml(money(z.amount))}` : '<i>not yet</i>'],
+    ['cart', s.cart ? `#${escapeHtml(s.cart.id)}, ${s.cart.purchased ? 'marked as purchased' : 'open'}` : '-'],
   ];
   for (const p of s.products) {
     const before = stockBefore?.[p.id];
-    const changed = before != null && before !== p.stock ? ` <span class="changed">(was ${before})</span>` : '';
-    rows.push([p.title.replace(/^Demo: /, ''), `stock ${p.stock}${changed}`]);
+    const changed = before != null && before !== p.stock ? ` <span class="changed">(was ${escapeHtml(before)})</span>` : '';
+    rows.push([escapeHtml(p.title.replace(/^Demo: /, '')), `stock ${escapeHtml(p.stock)}${changed}`]);
   }
   $('db').innerHTML = '<table>' + rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('') + '</table>' +
     `<p style="margin:10px 0 0">Read from the host's SQLite through Payload's local API, ${new Date().toLocaleTimeString('pl-PL')}.</p>`;
@@ -339,7 +349,7 @@ async function refreshDb() {
 $('blik').addEventListener('input', (e) => { e.target.style.borderColor = ''; const c = e.target.value.replace(/\D/g, '').slice(0, 6); e.target.value = c.length > 3 ? c.slice(0, 3) + ' ' + c.slice(3) : c; });
 $('blik2').addEventListener('input', (e) => { const c = e.target.value.replace(/\D/g, '').slice(0, 6); e.target.value = c.length > 3 ? c.slice(0, 3) + ' ' + c.slice(3) : c; });
 const cartFromUrl = new URLSearchParams(location.search).get('cart');
-if (cartFromUrl) { try { cart = JSON.parse(cartFromUrl); } catch {} history.replaceState(null, '', '/'); }
+if (cartFromUrl) { cart = parseCartParam(cartFromUrl); history.replaceState(null, '', '/'); }
 saveCart();
 loadProducts().then(() => {
   if (cartFromUrl) { show('checkout'); return; }
@@ -348,6 +358,10 @@ loadProducts().then(() => {
 });
 // stock "before" must survive the redirect to Tpay
 const _createPayment = createPayment; createPayment = async function () { const p = await _createPayment(); sessionStorage.setItem('stockBefore', JSON.stringify(stockBefore)); return p; };
+
+// A module has its own scope, so the handlers written as `onclick=` attributes
+// in the markup above need to be published deliberately.
+Object.assign(window, { addToCart, newPurchase, payOnTpay, payWithBlik, removeFromCart, retryBlik, show });
 </script>
 </body>
 </html>

@@ -83,6 +83,12 @@ const html = (res: http.ServerResponse, file: string) => {
   res.end(content)
 }
 
+const script = (res: http.ServerResponse, file: string) => {
+  const content = readFileSync(path.resolve(dirname, file), 'utf8')
+  res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' })
+  res.end(content)
+}
+
 const listProducts = async () => {
   const result = await payload.find({
     collection: 'products',
@@ -251,6 +257,8 @@ const server = http.createServer(async (nodeReq, nodeRes) => {
       return html(nodeRes, 'shop.html')
     }
 
+    // The page is a module now, and this is the module it imports.
+    if (method === 'GET' && url.pathname === '/shop/cart-param.mjs') return script(nodeRes, 'cart-param.mjs')
     if (method === 'GET' && url.pathname === '/shop/config') return json(nodeRes, 200, { publicAddress: (process.env.NEXT_PUBLIC_SERVER_URL || '').replace(/\/+$/, '') })
     if (method === 'GET' && url.pathname === '/shop/products') return json(nodeRes, 200, { products: await listProducts() })
     if (method === 'POST' && url.pathname === '/shop/cart') return json(nodeRes, 200, await createCart(await readJson(nodeReq)))
