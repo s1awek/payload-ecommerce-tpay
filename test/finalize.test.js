@@ -19,7 +19,7 @@ const seedTransaction = (payload, overrides = {}) =>
   })
 
 describe('closing the order', () => {
-  it('W-3: address from the request does not overwrite the address saved on the transaction', async () => {
+  it('address from the request does not overwrite the address saved on the transaction', async () => {
     const payload = new PayloadStub()
     payload.seed('carts', { id: 'carts-1' })
     const transaction = seedTransaction(payload, { customerEmail: 'victim@example.pl' })
@@ -34,7 +34,7 @@ describe('closing the order', () => {
     assert.equal(payload.docs('orders')[0].customerEmail, 'victim@example.pl')
   })
 
-  it('W-3: address from the request fills in a transaction that lacks one', async () => {
+  it('address from the request fills in a transaction that lacks one', async () => {
     const payload = new PayloadStub()
     payload.seed('carts', { id: 'carts-1' })
     const transaction = seedTransaction(payload, { customerEmail: undefined })
@@ -134,7 +134,7 @@ describe('closing the order', () => {
     assert.equal(payload.docs('transactions')[0].order, 'orders-winner')
   })
 
-  it('W2-4: a transaction outside pending still gets its order instead of losing it silently', async () => {
+  it('a transaction outside pending still gets its order instead of losing it silently', async () => {
     const payload = new PayloadStub()
     payload.seed('carts', { id: 'carts-1' })
     // A settled refusal recorded earlier by confirm-order, then a late transfer.
@@ -156,7 +156,7 @@ describe('closing the order', () => {
     assert.equal(payload.docs('transactions')[0].status, 'succeeded')
   })
 
-  it('W2-4: a conditional write nobody won keeps the order and attaches it unconditionally', async () => {
+  it('a conditional write nobody won keeps the order and attaches it unconditionally', async () => {
     const payload = new PayloadStub()
     payload.seed('carts', { id: 'carts-1' })
     const transaction = seedTransaction(payload)
@@ -188,7 +188,7 @@ describe('closing the order', () => {
     assert.equal(String(payload.docs('transactions')[0].order), String(result.order.id))
   })
 
-  it('W2-4: a refunded transaction gets the order attached but is not reported as succeeded again', async () => {
+  it('a refunded transaction gets the order attached but is not reported as succeeded again', async () => {
     const payload = new PayloadStub()
     payload.seed('carts', { id: 'carts-1' })
     const transaction = seedTransaction(payload, { status: 'refunded' })

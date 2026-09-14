@@ -221,8 +221,8 @@ describe('notification receiving endpoint', () => {
   })
 })
 
-describe('audit 11.09.2026: default values and resilience of the notification endpoint', () => {
-  it('S-1: without an explicit decision the JWS signature is required - a notification without the header is rejected', async () => {
+describe('default values and resilience of the notification endpoint', () => {
+  it('without an explicit decision the JWS signature is required - a notification without the header is rejected', async () => {
     const payload = new PayloadStub()
     seed(payload)
     const endpoint = notificationsEndpoint({ merchantId: MERCHANT_ID, securityCode: SECURITY_CODE })
@@ -235,7 +235,7 @@ describe('audit 11.09.2026: default values and resilience of the notification en
     assert.match(String(payload.logs.error[0]), /X-JWS-Signature/)
   })
 
-  it('S-1: verifyJws: false explicitly disables the requirement (known-good)', async () => {
+  it('verifyJws: false explicitly disables the requirement (known-good)', async () => {
     const payload = new PayloadStub()
     seed(payload)
 
@@ -245,7 +245,7 @@ describe('audit 11.09.2026: default values and resilience of the notification en
     assert.equal(payload.docs('orders').length, 1)
   })
 
-  it('W2-2: a transaction with no readable amount is a refusal, not a pass for any payment at all', async () => {
+  it('a transaction with no readable amount is a refusal, not a pass for any payment at all', async () => {
     const payload = new PayloadStub()
     seed(payload, { amount: undefined })
 
@@ -257,7 +257,7 @@ describe('audit 11.09.2026: default values and resilience of the notification en
     assert.match(String(payload.logs.error[0]), /amount/i)
   })
 
-  it('W2-2 known-good: a readable amount and a full payment still close the order', async () => {
+  it('known-good: a readable amount and a full payment still close the order', async () => {
     const payload = new PayloadStub()
     seed(payload)
 
@@ -266,7 +266,7 @@ describe('audit 11.09.2026: default values and resilience of the notification en
     assert.equal(payload.docs('orders').length, 1)
   })
 
-  it('W2-8: an unreadable tr_amount answers FALSE/400 instead of throwing', async () => {
+  it('an unreadable tr_amount answers FALSE/400 instead of throwing', async () => {
     // The values hit both exceptions in amount.ts: TypeError for anything
     // outside the decimal pattern, RangeError for too many decimal places.
     for (const trAmount of ['', 'abc', '19,99', '19.999']) {
@@ -306,7 +306,7 @@ describe('audit 11.09.2026: default values and resilience of the notification en
     assert.match(String(payload.logs.error[0]), /unreadable tr_paid/)
   })
 
-  it('W2-3: a transaction in a currency with another minor unit does not get an order', async () => {
+  it('a transaction in a currency with another minor unit does not get an order', async () => {
     const payload = new PayloadStub()
     seed(payload, { currency: 'JPY' })
 

@@ -54,8 +54,8 @@ const run = async (props = {}, data = {}) => {
 
   const handler = initiatePayment({
     client,
-    notificationUrl: 'https://sklep.example/api/payments/tpay/notifications',
-    payerSuccessUrl: 'https://sklep.example/order/ok',
+    notificationUrl: 'https://shop.example/api/payments/tpay/notifications',
+    payerSuccessUrl: 'https://shop.example/order/ok',
     ...props,
   })
 
@@ -90,8 +90,8 @@ describe('payment initiation', () => {
     assert.equal(calls[0].amount, 19.99, 'Tpay gets the decimal amount, not cents')
     assert.equal(calls[0].currency, 'PLN')
     assert.equal(calls[0].hiddenDescription, transaction.id, 'the identifier comes back in tr_crc')
-    assert.equal(calls[0].callbacks.notification.url, 'https://sklep.example/api/payments/tpay/notifications')
-    assert.equal(calls[0].callbacks.payerUrls.success, 'https://sklep.example/order/ok')
+    assert.equal(calls[0].callbacks.notification.url, 'https://shop.example/api/payments/tpay/notifications')
+    assert.equal(calls[0].callbacks.payerUrls.success, 'https://shop.example/order/ok')
     assert.equal(calls[0].lang, 'pl')
 
     assert.equal(result.paymentUrl, 'https://secure.tpay.com/pay/TR-1')
@@ -120,7 +120,7 @@ describe('payment initiation', () => {
 
     const handler = initiatePayment({
       client,
-      notificationUrl: 'https://sklep.example/api/payments/tpay/notifications',
+      notificationUrl: 'https://shop.example/api/payments/tpay/notifications',
     })
 
     await assert.rejects(
@@ -141,7 +141,7 @@ describe('payment initiation', () => {
 
     const handler = initiatePayment({
       client,
-      notificationUrl: 'https://sklep.example/api/payments/tpay/notifications',
+      notificationUrl: 'https://shop.example/api/payments/tpay/notifications',
     })
 
     await assert.rejects(
@@ -205,7 +205,7 @@ describe('payer data and cart items', () => {
   })
 })
 
-// --- audit round 2, 14.09.2026: currencies whose minor unit is not two decimals ---
+// --- currencies whose minor unit is not two decimals ---
 //
 // Both ends of the trip used to hard-code two decimal places. For a currency
 // with a different exponent the outgoing conversion and the gate comparing the
@@ -213,14 +213,14 @@ describe('payer data and cart items', () => {
 // through a payment worth a hundredth of the price. The package refuses such a
 // currency instead of guessing its exponent.
 
-describe('W2-3: the package settles two decimal currencies only', () => {
-  it('W2-3: a currency with a different minor unit is refused before any transaction exists', async () => {
+describe('the package settles two decimal currencies only', () => {
+  it('a currency with a different minor unit is refused before any transaction exists', async () => {
     const payload = new PayloadStub()
     const { calls, client } = fakeClient()
 
     const handler = initiatePayment({
       client,
-      notificationUrl: 'https://sklep.example/api/payments/tpay/notifications',
+      notificationUrl: 'https://shop.example/api/payments/tpay/notifications',
     })
 
     await assert.rejects(
@@ -236,12 +236,12 @@ describe('W2-3: the package settles two decimal currencies only', () => {
     assert.equal(calls.length, 0, 'and nothing is sent to Tpay')
   })
 
-  it('W2-3: the refusal does not depend on the case of the code', async () => {
+  it('the refusal does not depend on the case of the code', async () => {
     await assert.rejects(run({}, { currency: 'jpy' }), /two decimal currencies only/)
     await assert.rejects(run({}, { currency: 'KWD' }), /two decimal currencies only/)
   })
 
-  it('W2-3 known-good: PLN and EUR go through with the amount unchanged', async () => {
+  it('known-good: PLN and EUR go through with the amount unchanged', async () => {
     for (const currency of ['PLN', 'EUR', 'usd', 'GBP']) {
       const { calls, payload } = await run({}, { currency })
 
@@ -251,7 +251,7 @@ describe('W2-3: the package settles two decimal currencies only', () => {
     }
   })
 
-  it('W2-3: the table answers with the real ISO 4217 exponent, two by default', () => {
+  it('the table answers with the real ISO 4217 exponent, two by default', () => {
     assert.equal(minorUnitDecimals('PLN'), 2)
     assert.equal(minorUnitDecimals('eur'), 2)
     assert.equal(minorUnitDecimals(' gbp '), 2)
@@ -266,17 +266,17 @@ describe('W2-3: the package settles two decimal currencies only', () => {
   })
 })
 
-// --- audit round 2, 14.09.2026: a cart can only be paid for once (W2-12) ---
+// --- a cart can only be paid for once ---
 
-describe('W2-12: a cart that has already been paid for cannot start another payment', () => {
-  it('W2-12: the flag is read from the database, because the plugin does not select it', async () => {
+describe('a cart that has already been paid for cannot start another payment', () => {
+  it('the flag is read from the database, because the plugin does not select it', async () => {
     const payload = new PayloadStub()
     payload.seed('carts', { id: 'carts-1', purchasedAt: '2026-09-14T10:00:00.000Z' })
     const { calls, client } = fakeClient()
 
     const handler = initiatePayment({
       client,
-      notificationUrl: 'https://sklep.example/api/payments/tpay/notifications',
+      notificationUrl: 'https://shop.example/api/payments/tpay/notifications',
     })
 
     await assert.rejects(
@@ -294,13 +294,13 @@ describe('W2-12: a cart that has already been paid for cannot start another paym
     assert.equal(calls.length, 0, 'and Tpay is never asked to take the money')
   })
 
-  it('W2-12: the flag on the passed cart is refused too', async () => {
+  it('the flag on the passed cart is refused too', async () => {
     const payload = new PayloadStub()
     const { calls, client } = fakeClient()
 
     const handler = initiatePayment({
       client,
-      notificationUrl: 'https://sklep.example/api/payments/tpay/notifications',
+      notificationUrl: 'https://shop.example/api/payments/tpay/notifications',
     })
 
     await assert.rejects(
@@ -321,14 +321,14 @@ describe('W2-12: a cart that has already been paid for cannot start another paym
     assert.equal(calls.length, 0)
   })
 
-  it('W2-12 known-good: a cart with no purchase behind it goes through', async () => {
+  it('known-good: a cart with no purchase behind it goes through', async () => {
     const payload = new PayloadStub()
     payload.seed('carts', { id: 'carts-1' })
     const { calls, client } = fakeClient()
 
     const handler = initiatePayment({
       client,
-      notificationUrl: 'https://sklep.example/api/payments/tpay/notifications',
+      notificationUrl: 'https://shop.example/api/payments/tpay/notifications',
     })
 
     const result = await handler({
@@ -342,7 +342,7 @@ describe('W2-12: a cart that has already been paid for cannot start another paym
     assert.equal(result.tpayTransactionID, 'TR-1')
   })
 
-  it('W2-12: a cart that cannot be read warns but does not block a real payment', async () => {
+  it('a cart that cannot be read warns but does not block a real payment', async () => {
     // Nothing is seeded into the carts collection, so the read throws - the same
     // as a cart deleted between the plugin loading it and the adapter looking
     // again. That is not evidence of a second payment, so the checkout stands.

@@ -338,8 +338,8 @@ describe('reading payment status', () => {
   })
 })
 
-describe('audit 11.09.2026: identity of the payment proof and error content in the BLIK endpoints', () => {
-  it('W-4: a paid status with a different amount does not close the order and responds 409 with a fixed message', async () => {
+describe('identity of the payment proof and error content in the BLIK endpoints', () => {
+  it('a paid status with a different amount does not close the order and responds 409 with a fixed message', async () => {
     const payload = new PayloadStub()
     seed(payload) // 1999 cents
     const client = {
@@ -358,7 +358,7 @@ describe('audit 11.09.2026: identity of the payment proof and error content in t
     assert.equal(payload.logs.error.length, 1, 'the details go to the log')
   })
 
-  it('S-5: an error outside BlikError does not leak the exception content to the outside', async () => {
+  it('an error outside BlikError does not leak the exception content to the outside', async () => {
     const payload = new PayloadStub()
     seed(payload)
     const client = {

@@ -128,7 +128,7 @@ describe('order confirmation after the payer returns', () => {
     )
   })
 
-  it('W2-10: an unknown transaction and somebody else\'s transaction give the same answer', async () => {
+  it('an unknown transaction and somebody else\'s transaction give the same answer', async () => {
     const payload = new PayloadStub()
     seed(payload)
     const { client } = clientReturning('correct')
@@ -149,7 +149,7 @@ describe('order confirmation after the payer returns', () => {
     assert.equal(messages[1].status, 403)
   })
 
-  it('W2-11: a deleted cart is a refusal, not a crash', async () => {
+  it('a deleted cart is a refusal, not a crash', async () => {
     const payload = new PayloadStub()
     seed(payload)
     // The transaction points at a cart that no longer exists, which is what a
@@ -172,9 +172,9 @@ describe('order confirmation after the payer returns', () => {
     assert.equal(payload.docs('orders').length, 0)
   })
 
-  // --- audit 11.09.2026: access gates and identity of the payment proof ---
+  // --- access gates and identity of the payment proof ---
 
-  it('K-1: does not close a transaction lacking a Tpay identifier using proof supplied in the request', async () => {
+  it('does not close a transaction lacking a Tpay identifier using proof supplied in the request', async () => {
     const payload = new PayloadStub()
     // The window between `create` and saving the Tpay identifier: the document exists, the identifier does not.
     seed(payload, { amount: 149000, tpay: {} })
@@ -194,7 +194,7 @@ describe('order confirmation after the payer returns', () => {
     assert.equal(payload.docs('transactions')[0].status, 'pending')
   })
 
-  it('W-1: rejects confirmation without a cart secret and without a logged-in owner', async () => {
+  it('rejects confirmation without a cart secret and without a logged-in owner', async () => {
     const payload = new PayloadStub()
     seed(payload)
     const { calls, client } = clientReturning('correct')
@@ -215,7 +215,7 @@ describe('order confirmation after the payer returns', () => {
     assert.equal(payload.docs('orders').length, 0)
   })
 
-  it('W-1: a transaction already closed is also behind the gate - orderID and accessToken do not leak', async () => {
+  it('a transaction already closed is also behind the gate - orderID and accessToken do not leak', async () => {
     const payload = new PayloadStub()
     payload.seed('orders', { id: 'orders-1', accessToken: 'owner-token' })
     seed(payload, { order: 'orders-1', status: 'succeeded' })
@@ -230,7 +230,7 @@ describe('order confirmation after the payer returns', () => {
     )
   })
 
-  it('W-1: lets through the logged-in owner of the transaction without a secret', async () => {
+  it('lets through the logged-in owner of the transaction without a secret', async () => {
     // known-good: a gate that never lets anyone through is equally broken
     const payload = new PayloadStub()
     seed(payload, { customer: 'users-7' })
@@ -244,7 +244,7 @@ describe('order confirmation after the payer returns', () => {
     assert.equal(result.message, 'Order confirmed successfully')
   })
 
-  it('W-4: a payment with a different amount than the transaction does not close the order', async () => {
+  it('a payment with a different amount than the transaction does not close the order', async () => {
     const payload = new PayloadStub()
     seed(payload) // 1999 cents
     const { client } = clientReturning('correct', { amount: 1.0 })
@@ -258,7 +258,7 @@ describe('order confirmation after the payer returns', () => {
     assert.equal(payload.docs('transactions')[0].status, 'pending')
   })
 
-  it('W-4: a payment in a different currency than the transaction does not close the order', async () => {
+  it('a payment in a different currency than the transaction does not close the order', async () => {
     const payload = new PayloadStub()
     seed(payload) // PLN
     const { client } = clientReturning('correct', { currency: 'EUR' })
@@ -271,7 +271,7 @@ describe('order confirmation after the payer returns', () => {
     assert.equal(payload.docs('orders').length, 0)
   })
 
-  it('W-4: an API response without an amount is a refusal, not a bypass of the check', async () => {
+  it('an API response without an amount is a refusal, not a bypass of the check', async () => {
     const payload = new PayloadStub()
     seed(payload)
     const { client } = clientReturning('correct', { amount: undefined })
@@ -282,7 +282,7 @@ describe('order confirmation after the payer returns', () => {
     )
   })
 
-  it('W2-3: a transaction in a currency with another minor unit cannot pass the amount gate', async () => {
+  it('a transaction in a currency with another minor unit cannot pass the amount gate', async () => {
     const payload = new PayloadStub()
     // 1999 minor units of a zero decimal currency is 1999 yen, but the outgoing
     // side would have sent 19.99 and this gate used to scale the answer back by
@@ -300,15 +300,15 @@ describe('order confirmation after the payer returns', () => {
   })
 })
 
-// --- audit round 2, 14.09.2026: the stock decrement trigger ---
+// --- the stock decrement trigger ---
 //
 // The contract with the layer above: the plugin's handler decrements inventory
 // whenever the adapter's answer carries `transactionID`
 // (`dist/endpoints/confirmOrder.js`, the `if (paymentResponse.transactionID)`
 // branch). So exactly one answer per transaction may carry it.
 
-describe('W2-1: the stock decrement trigger is handed out at most once', () => {
-  it('W2-1: a repeated confirmation does not hand the layer above another decrement trigger', async () => {
+describe('the stock decrement trigger is handed out at most once', () => {
+  it('a repeated confirmation does not hand the layer above another decrement trigger', async () => {
     const payload = new PayloadStub()
     seed(payload)
     const { client } = clientReturning('correct')
@@ -341,7 +341,7 @@ describe('W2-1: the stock decrement trigger is handed out at most once', () => {
     )
   })
 
-  it('W2-1: the notification closed the order first, the buyer then decrements exactly once', async () => {
+  it('the notification closed the order first, the buyer then decrements exactly once', async () => {
     const payload = new PayloadStub()
     // The server-to-server notification got there first: the order exists and
     // the transaction is closed before the browser ever comes back.
@@ -361,7 +361,7 @@ describe('W2-1: the stock decrement trigger is handed out at most once', () => {
     assert.equal(payload.docs('orders').length, 1)
   })
 
-  it('W2-1: a claim that cannot be written hands out no trigger at all', async () => {
+  it('a claim that cannot be written hands out no trigger at all', async () => {
     // known-bad: a decrement that happened twice cannot be undone automatically,
     // a decrement that never happened is visible in the panel.
     const payload = new PayloadStub()

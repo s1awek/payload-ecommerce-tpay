@@ -3,14 +3,14 @@ import { describe, it } from 'node:test'
 
 import { notificationSummary, redactSecrets } from '../dev/log-redact.mjs'
 
-// --- audit round 2, 14.09.2026: the development host's log (W2-5, W2-16) ---
+// --- the development host's log ---
 //
 // The dev host logged whole responses and whole notification bodies. Those
 // carry an order's `accessToken`, a guest cart's `secret` and the notification
 // `md5sum`, and log files travel further than anyone expects.
 
-describe('W2-16: secrets do not reach the development log', () => {
-  it('W2-16 known-bad: a JSON answer loses its accessToken and secret', () => {
+describe('secrets do not reach the development log', () => {
+  it('known-bad: a JSON answer loses its accessToken and secret', () => {
     const answer = JSON.stringify({
       accessToken: 'at_live_9f2c',
       message: 'Order confirmed successfully',
@@ -28,7 +28,7 @@ describe('W2-16: secrets do not reach the development log', () => {
     assert.ok(redacted.includes('orders-1'))
   })
 
-  it('W2-16 known-bad: a token response and a form body are redacted too', () => {
+  it('known-bad: a token response and a form body are redacted too', () => {
     assert.ok(!redactSecrets('{"access_token":"tok_123","expires_in":7200}').includes('tok_123'))
     assert.ok(!redactSecrets('tr_id=TR-1&md5sum=0badc0ffee&tr_status=TRUE').includes('0badc0ffee'))
     assert.ok(!redactSecrets('/api/cart?secret=abc123&cartID=7').includes('abc123'))
@@ -38,7 +38,7 @@ describe('W2-16: secrets do not reach the development log', () => {
     assert.ok(!redactSecrets(long).slice(0, 300).includes('xxxx'))
   })
 
-  it('W2-16 known-good: ordinary text is not mangled', () => {
+  it('known-good: ordinary text is not mangled', () => {
     const plain = '{"message":"Payment is not completed yet (Tpay status: pending).","status":409}'
 
     assert.equal(redactSecrets(plain), plain)
@@ -47,11 +47,11 @@ describe('W2-16: secrets do not reach the development log', () => {
   })
 })
 
-describe('W2-5: a notification leaves a summary, never its body', () => {
+describe('a notification leaves a summary, never its body', () => {
   const body =
     'id=123456&tr_id=TR-1&tr_amount=19.99&tr_paid=19.99&tr_status=TRUE&tr_crc=transactions-1&md5sum=6b1a2f'
 
-  it('W2-5: the checksum does not appear, the field names and the verdict do', () => {
+  it('the checksum does not appear, the field names and the verdict do', () => {
     const summary = notificationSummary(body, { signed: true })
 
     assert.ok(!summary.includes('6b1a2f'), 'md5sum must never reach the log')
@@ -61,7 +61,7 @@ describe('W2-5: a notification leaves a summary, never its body', () => {
     assert.match(summary, /X-JWS-Signature=present/)
   })
 
-  it('W2-5: a missing signature is visible, and an empty body does not throw', () => {
+  it('a missing signature is visible, and an empty body does not throw', () => {
     assert.match(notificationSummary(body, { signed: false }), /X-JWS-Signature=MISSING/)
     assert.match(notificationSummary(''), /tr_id=\(none\) tr_status=\(none\)/)
     assert.match(notificationSummary(undefined), /fields=\(none\)/)

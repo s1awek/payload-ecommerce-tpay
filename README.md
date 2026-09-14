@@ -1,14 +1,22 @@
 # @wellmade/payload-ecommerce-tpay
 
+[![npm](https://img.shields.io/npm/v/@wellmade/payload-ecommerce-tpay.svg)](https://www.npmjs.com/package/@wellmade/payload-ecommerce-tpay)
+[![license](https://img.shields.io/npm/l/@wellmade/payload-ecommerce-tpay.svg)](./LICENSE)
+[![node](https://img.shields.io/node/v/@wellmade/payload-ecommerce-tpay.svg)](https://nodejs.org)
+
 Tpay payment adapter for [`@payloadcms/plugin-ecommerce`](https://payloadcms.com). Gives a Payload CMS 3 shop the payment methods Polish customers actually use: BLIK, online bank transfers (pay-by-link) and cards, through a single [Tpay](https://tpay.com) account.
 
 Written for the plugin's official `PaymentAdapter` contract, so it plugs in exactly where the built-in Stripe adapter would.
+
+*Dokumentacja po polsku: [README.pl.md](./README.pl.md).*
 
 ## Requirements
 
 - Payload CMS 3.83 or newer with `@payloadcms/plugin-ecommerce`
 - Node 20.9 or newer
 - A Tpay merchant account (sandbox account: [register.sandbox.tpay.com](https://register.sandbox.tpay.com/))
+
+Developed and tested against Payload and `@payloadcms/plugin-ecommerce` 3.88.0. The plugin pins `payload` to an exact version in its own peer dependencies, so the two always move together; this package accepts the 3.x line and does not claim compatibility with 4.x.
 
 ## Install
 
@@ -65,6 +73,36 @@ import { tpayAdapterClient } from '@wellmade/payload-ecommerce-tpay'
 
 const paymentMethods = [tpayAdapterClient({ label: 'BLIK, transfer, card' })]
 ```
+
+### Adapter options
+
+Every option is optional; the credentials fall back to environment variables, and the adapter throws at startup if `clientId` or `clientSecret` ends up empty.
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `clientId` | `string` | `TPAY_CLIENT_ID` | OAuth client ID from the Tpay panel (Integration > API). |
+| `clientSecret` | `string` | `TPAY_CLIENT_SECRET` | OAuth secret. |
+| `merchantId` | `number \| string` | `TPAY_MERCHANT_ID` | Merchant number from the panel. Goes into the notification checksum. |
+| `securityCode` | `string` | `TPAY_SECURITY_CODE` | Notification security code. Without it notifications are refused, never waved through. |
+| `sandbox` | `boolean` | `TPAY_SANDBOX === 'true'` | Routes every call to the sandbox API. |
+| `notificationUrl` | `string` | derived from `NEXT_PUBLIC_SERVER_URL` or `PAYLOAD_PUBLIC_SERVER_URL` | Absolute public URL Tpay sends the result to. |
+| `payerSuccessUrl` | `string` | none | Where Tpay returns the payer after a successful payment. **Set it** - see the note below. |
+| `payerErrorUrl` | `string` | none | Where Tpay returns the payer after a failed payment. |
+| `verifyJws` | `boolean` | `true` | Verifies the `X-JWS-Signature` header over the whole notification body. `false` disables the layer explicitly. |
+| `jwsRootCertificate` | `string` (PEM) | none | Tpay root certificate, so the certificate chain is checked too, not only the signature. |
+| `timeoutMs` | `number` | `15000` | Ceiling on a single request to the Tpay API. `0` turns it off. |
+| `cartsSlug` | `string` | `'carts'` | Slug of the carts collection. Set it if you renamed the collection - the plugin passes its own slug to `confirmOrder` but not to `initiatePayment`. |
+| `lang` | `string` | `'pl'` | Language of the Tpay payment page. |
+| `label` | `string` | `'Tpay'` | Readable name of the payment method. |
+| `groupOverrides` | `object` | none | Overrides for the field group the adapter contributes to `transactions`. |
+
+**`payerSuccessUrl` and `payerErrorUrl` are worth setting deliberately.** The adapter sends the return URLs to Tpay only when you provide them. Leave them out and Tpay returns the payer wherever the merchant panel points, which is outside your shop, so `confirm-order` is never called - and that endpoint is where the plugin decrements stock. A shop missing these two settings takes payments and never adjusts inventory.
+
+### Schema change
+
+The adapter contributes a `tpay` field group to the plugin's `transactions` collection: `transactionId`, `title`, `paymentUrl`, `shippingAddress` and `stockClaimedAt`. Adding the adapter therefore changes your database schema - run your usual Payload migration step (`payload migrate:create` then `payload migrate`, or a dev push) after installing it.
+
+`tpay.stockClaimedAt` is the one to know about: it is how the adapter hands the plugin's stock decrement trigger to at most one `confirm-order` call per transaction. It is also the field to query when reconciling inventory, because a succeeded transaction that has an order but no `stockClaimedAt` is one whose stock nobody adjusted. See Known limitations.
 
 ### Environment variables
 
@@ -209,15 +247,29 @@ npm test     # builds, then runs the suite
 
 The suite runs offline against fixtures and a Payload stub: no Tpay account is needed. Certificates for the signature tests are generated at test time with `openssl`, so no private key is checked in.
 
-## Who built this
+### Running the demo shop
 
-Built by [Wellmade](https://wellmade.online/en), a one person studio working on Payload, headless
-commerce and WordPress. The adapter came out of running a real Payload shop in production and needing
-Polish payment methods that Stripe does not cover.
+[`dev/`](dev/README.md) holds a real Payload instance with `@payloadcms/plugin-ecommerce` and this adapter installed, plus a click-through demo shop: a catalogue, a cart, and a checkout with a six digit BLIK field next to a "pay on the Tpay page" button. A side panel shows what each step actually wrote to the database. It is how the behaviour described in this README was measured, and the quickest way to see the adapter work before wiring it into your own shop.
 
-If this adapter is close to what your shop needs but not quite there, the gaps are listed under
-Limitations above. Extensions, other Polish providers and paid work on this package are all possible.
+```bash
+npm install && npm run build          # the host imports the built ../dist
+cd dev
+pnpm install
+export TPAY_CLIENT_ID=... TPAY_CLIENT_SECRET=... TPAY_MERCHANT_ID=... TPAY_SECURITY_CODE=...
+export NEXT_PUBLIC_SERVER_URL=https://<public tunnel to 127.0.0.1:8099>
+node --import tsx shop.mts            # then open http://127.0.0.1:8099/
+```
+
+Sandbox credentials are enough; the host sets `sandbox: true` itself. The BLIK path needs no tunnel, because it reads the payment state by asking Tpay rather than waiting for a notification; the redirect path does, since Tpay delivers the result as a server to server request that never reaches a local address. `dev/README.md` covers the tunnel, the scripted runs for an accepted and a refused BLIK code, and an instrument check to run before you trust a silent notification endpoint.
+
+The access configuration in `dev/payload.config.ts` is deliberately wide open so scripts can drive the instance without logging in. Do not copy it into a shop; the Configure section above says why.
+
+## Made by Wellmade
+
+Built and maintained by [Wellmade](https://wellmade.online/en), a studio building Payload and headless commerce shops. It came out of running a Payload shop in production that needed the Polish payment methods Stripe does not cover.
+
+Gaps are listed under Known limitations above; issues and pull requests are welcome, and paid work on this package is possible.
 
 ## License
 
-MIT
+MIT - see [LICENSE](./LICENSE). Copyright (c) 2026 Wellmade.

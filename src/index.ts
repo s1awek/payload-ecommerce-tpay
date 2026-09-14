@@ -122,7 +122,7 @@ export const tpayAdapter = (props: TpayAdapterArgs = {}): PaymentAdapter => {
     name: TPAY_PAYMENT_METHOD,
     // The plugin's `ConfirmOrderReturnType` declares `transactionID` required,
     // but that key is what makes its handler decrement inventory, so an answer
-    // that must not decrement anything a second time has to omit it (W2-1).
+    // that must not decrement anything a second time has to omit it.
     // The handler itself reads the field as `if (paymentResponse.transactionID)`,
     // so an absent key is a case it already handles. The cast sits here, once,
     // with the reason next to it.

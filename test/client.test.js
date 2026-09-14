@@ -148,10 +148,10 @@ describe('Tpay client', () => {
   })
 })
 
-// --- audit round 2, 14.09.2026: no outgoing request waits forever (W2-9) ---
+// --- no outgoing request waits forever ---
 
-describe('W2-9: every request to Tpay carries a deadline', () => {
-  it('W2-9: the token request and the API request both get an abort signal', async () => {
+describe('every request to Tpay carries a deadline', () => {
+  it('the token request and the API request both get an abort signal', async () => {
     const { calls, fetchImpl } = recorder([json(AUTH), json({ transactionId: 'TR' })])
     const client = new TpayClient({ clientId: 'id', clientSecret: 'secret', fetchImpl })
 
@@ -167,7 +167,7 @@ describe('W2-9: every request to Tpay carries a deadline', () => {
     assert.notEqual(calls[0].signal, calls[1].signal, 'each request gets its own clock')
   })
 
-  it('W2-9: the retry after a 401 starts a new clock instead of inheriting one', async () => {
+  it('the retry after a 401 starts a new clock instead of inheriting one', async () => {
     const { calls, fetchImpl } = recorder([
       json(AUTH),
       json({ message: 'expired' }, 401),
@@ -183,7 +183,7 @@ describe('W2-9: every request to Tpay carries a deadline', () => {
     assert.equal(new Set(signals).size, 4, 'four requests, four signals')
   })
 
-  it('W2-9: the ceiling is configurable, and zero turns it off deliberately', async () => {
+  it('the ceiling is configurable, and zero turns it off deliberately', async () => {
     const fast = recorder([json(AUTH), json({ transactionId: 'TR' })])
     const client = new TpayClient({
       clientId: 'id',

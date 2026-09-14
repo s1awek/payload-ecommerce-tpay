@@ -52,10 +52,10 @@ describe('amount conversion', () => {
   })
 })
 
-// --- audit round 2, 14.09.2026: the one place where a float is scaled (W2-14) ---
+// --- the one place where a float is scaled ---
 
 describe('amounts from the Tpay REST API', () => {
-  it('W2-14: a number with two decimal places becomes minor units with no drift', () => {
+  it('a number with two decimal places becomes minor units with no drift', () => {
     const cases = [
       [19.99, 1999],
       [4.35, 435],
@@ -71,20 +71,20 @@ describe('amounts from the Tpay REST API', () => {
     }
   })
 
-  it('W2-14: a string takes the exact path - too many places is a refusal, not a rounding', () => {
+  it('a string takes the exact path - too many places is a refusal, not a rounding', () => {
     assert.equal(apiAmountToMinor('19.99'), 1999)
     assert.equal(apiAmountToMinor('19.999'), undefined)
     assert.equal(apiAmountToMinor('19,99'), undefined)
   })
 
-  it('W2-14: what cannot be read does not pretend to be zero', () => {
+  it('what cannot be read does not pretend to be zero', () => {
     for (const value of [undefined, null, '', {}, Number.NaN, Number.POSITIVE_INFINITY]) {
       assert.equal(apiAmountToMinor(value), undefined, String(value))
     }
   })
 
-  it('W2-14: the number of decimal places is a parameter, and two is the whole package assumption', () => {
-    // The known-bad for W2-3: with a zero decimal currency both ends of the trip
+  it('the number of decimal places is a parameter, and two is the whole package assumption', () => {
+    // The known-bad for the two decimal rule: with a zero decimal currency both ends of the trip
     // make the same mistake, so the amount gate reports a match across a
     // hundredfold difference. The currency table is what stops that, not this
     // function.

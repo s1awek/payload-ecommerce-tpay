@@ -16,7 +16,7 @@ import { test } from 'node:test'
 import { isChecksumValid, parseNotificationBody } from '../dist/verify.js'
 
 const RAW = readFileSync(new URL('./fixtures/sandbox-notification.txt', import.meta.url), 'utf8')
-const ARGS = { merchantId: '12345', securityCode: 'atrapa-kodu-bezpieczenstwa' }
+const ARGS = { merchantId: '12345', securityCode: 'dummy-security-code' }
 
 test('the notification carries fields that our type did not list', () => {
   const n = parseNotificationBody(RAW)

@@ -18,9 +18,8 @@ export class RemoteMismatchError extends Error {
  * Before we close the order it has to be THIS transaction: the same amount and
  * the same currency as the document in our database. Without that comparison,
  * proof of payment for a cheap transaction could be substituted for an expensive
- * one (audit 11.09.2026, findings K-1 and W-4). The server-to-server
- * notification has its counterpart of this gate in the comparison of `tr_paid`
- * against the transaction amount.
+ * one. The server-to-server notification has its counterpart of this gate in
+ * the comparison of `tr_paid` against the transaction amount.
  *
  * A missing amount or currency in the API response is a refusal, not something
  * to skip over: where money is involved, a change in the shape of the response
