@@ -122,7 +122,7 @@ Trzy rzeczy są tu zmierzone na żywej piaskownicy, a nie założone, i każda z
 
 - **Tpay odpowiada `success` na kod, który nie ma prawa być poprawny.** Dosłowny kod `abcdef` wrócił jako `result: success` z płatnością w toku. Odpowiedź na `/blik` znaczy więc „żądanie doszło", nigdy „klient zapłacił". Ten adapter nigdy nie ogłasza na jej podstawie zapłaty.
 - **Odrzucony kod nie zmienia statusu transakcji.** Zostaje `pending`, a jedynym śladem odmowy jest `paymentErrorCode` przy ostatniej pozycji `payments.attempts`. Zmierzone kodem `000000`, który dał błąd `63` przy transakcji nadal opisanej jako `pending`. `/blik-status` czyta tę pozycję i odpowiada `rejected`, dzięki czemu kasa może poprosić o kolejny kod zamiast zostawiać kupującego przy kręcącym się kółku. Płatność zostaje otwarta, a następny kod idzie do tej samej transakcji, bez drugiego zamówienia i bez drugiej transakcji.
-- **Te punkty świadomie omijają `confirm-order` wtyczki.** Tamten handler zdejmuje stan magazynowy przy każdym wywołaniu, a BLIK 0 wymaga odpytywania, więc użycie go tutaj zabierałoby sztukę przy każdym sprawdzeniu. `/blik-status` domyka zamówienie tą samą, idempotentną drogą, którą robi to powiadomienie serwer-serwer. Druga strona tego medalu jest w znanych ograniczeniach: kasa oparta wyłącznie na BLIK-u nigdy nie uruchomi zdejmowania stanu we wtyczce, więc musi zrobić to sama.
+- **Te punkty świadomie omijają `confirm-order` wtyczki.** Tamten handler jest napisany pod kupującego, który wraca raz, nie pod pętlę: zdejmuje stan magazynowy zawsze, gdy odpowiedź adaptera niesie `transactionID`, a BLIK 0 wymaga odpytywania, aż kod zostanie przyjęty albo odrzucony. Rezerwacja opisana w znanych ograniczeniach utrzymałaby to zdjęcie na jednym, ale odpytanie o status w ogóle nie powinno decydować o stanie magazynu. `/blik-status` domyka zamówienie tą samą, idempotentną drogą, którą robi to powiadomienie serwer-serwer. Druga strona tego medalu jest w znanych ograniczeniach: kasa oparta wyłącznie na BLIK-u nigdy nie uruchomi zdejmowania stanu we wtyczce, więc musi zrobić to sama.
 
 Cała ścieżka przechodzi na prawdziwej instancji Payloada z wpiętą wtyczką w [`dev/`](dev/README.md), razem z odmową: dobry kod przestawia płatność na `paid` z jednym zamówieniem, kod odrzucony daje `rejected` i zostawia płatność otwartą, a kolejny kod wysłany do tej samej płatności domyka ją.
 
@@ -192,6 +192,16 @@ decimalStringToMinor('19.99') // 1999
   zamówienia, nie zobaczy, że pieniądze wróciły - obserwuj status transakcji albo dodaj hak, który
   go odzwierciedla.
 - **Domknięcie zamówienia nie jest atomowym compare-and-swap.** `payload.update` z warunkiem `where` to wyszukanie, a dopiero potem zapis po dokumencie, więc zostaje wąskie okno, w którym powiadomienie i przeglądarka uznają się jednocześnie za tego, kto domknął zamówienie. Skutkiem jest osierocony dokument zamówienia, nigdy podwójne obciążenie, bo płatność jest jedna. Domknięcie okna oznaczałoby ominięcie haków kolekcji, co jest gorszym wyborem. O zwycięstwie decyduje to, kto pierwszy przypnie zamówienie, a nie status transakcji: transakcja, która już ma zamówienie, dostaje z powrotem to samo, a transakcja bez zamówienia dostaje je na zweryfikowane powiadomienie o zapłacie także wtedy, gdy jej status zdążył się zmienić, bo rozliczona odmowa i późniejsza wpłata nie mogą kosztować kupującego zamówienia.
+- **Sklep demo koryguje stan z koszyka, a zamówienie powstaje z transakcji.** Jego trasa
+  `/shop/decrement-stock` czyta `cart.items`, podczas gdy zamówienie tworzone tutaj bierze się
+  z `transaction.items` - z migawki zrobionej w chwili rozpoczęcia płatności. W demo te dwie listy
+  są takie same, w sklepie mogą się różnić, bo koszyk daje się edytować po `initiate` (druga karta,
+  powolny kupujący). Stan zdejmuj z pozycji transakcji, czyli z tej listy, z której naprawdę powstaje
+  zamówienie.
+- **`secret` koszyka gościa wydaje wtyczka raz, przy zakładaniu koszyka.** Nie ma rotacji i adapter
+  jej nie dokłada: kto ma kopię, udowodni ten koszyk aż do zakupu - i właśnie dlatego sekret nie może
+  wędrować w adresie URL, w linii logu ani w zdarzeniu analitycznym. Trzymaj go tam, gdzie żyje
+  koszyk, i wysyłaj wyłącznie w ciele żądania.
 - Płatności cykliczne, tokenizacja kart, transakcje marketplace i zwroty przez API nie są zaimplementowane.
 
 ## Praca nad pakietem

@@ -121,7 +121,7 @@ Three things here are measured against a live sandbox rather than assumed, and e
 
 - **Tpay answers `success` to a code that cannot possibly be valid.** The literal code `abcdef` came back as `result: success` with the payment pending. The response to `/blik` therefore means "your request arrived", never "the customer paid". This adapter never reports a payment on the strength of it.
 - **A rejected code does not change the transaction status.** It stays `pending`, and the only trace of the refusal is `paymentErrorCode` on the last entry of `payments.attempts`. Measured with code `000000`, which produced error `63` while the transaction still read `pending`. `/blik-status` reads that entry and answers `rejected`, so your checkout can ask for another code instead of leaving the buyer watching a spinner forever. The payment stays open and the next code goes to the same transaction, with no second order and no second transaction.
-- **These endpoints deliberately bypass the plugin's `confirm-order`.** That handler decrements inventory on every single call, and BLIK level 0 requires polling, so using it here would take a unit of stock per poll. `/blik-status` finishes the order through the same idempotent path the server to server notification uses. The flip side is in Known limitations: a checkout that only ever uses BLIK never triggers the plugin's decrement, so it has to adjust stock itself.
+- **These endpoints deliberately bypass the plugin's `confirm-order`.** That handler is written for a buyer coming back once, not for a loop: it decrements inventory whenever the adapter's answer carries `transactionID`, and BLIK level 0 requires polling until the code is accepted or refused. The claim described under Known limitations would hold the decrement to one, but a status poll has no business deciding stock at all. `/blik-status` finishes the order through the same idempotent path the server to server notification uses. The flip side is in Known limitations: a checkout that only ever uses BLIK never triggers the plugin's decrement, so it has to adjust stock itself.
 
 The whole path runs against a real Payload instance with the plugin installed in [`dev/`](dev/README.md), including the refusal: a good code moves the payment to `paid` with one order, a refused code answers `rejected` and leaves the payment open, and a second code sent to that same payment completes it.
 
@@ -189,6 +189,15 @@ decimalStringToMinor('19.99') // 1999
   transaction to `refunded` and leaves the order in `processing`. A shop that watches orders alone
   will not see that the money went back; watch the transaction status, or add a hook that mirrors it.
 - **Finishing an order is not an atomic compare and swap.** `payload.update` with a `where` clause is a find followed by a per-document write, so there is a narrow window in which the notification and the browser both believe they finished the order. The result is an orphaned order document, never a double charge, since there is only ever one payment. Closing the window would mean bypassing collection hooks, which is the worse trade. The race is decided by whoever attaches an order first, not by the transaction status: a transaction that already has an order gets that same order back, and a transaction with no order gets one on a verified paid notification even when its status has already moved somewhere else, because a settled refusal followed by a late transfer must not cost the buyer their order.
+- **The demo shop adjusts stock from the cart, the order is built from the transaction.** Its
+  `/shop/decrement-stock` route reads `cart.items`, while the order created here comes from
+  `transaction.items` - the snapshot taken when the payment started. The two lists are the same in
+  the demo and can differ in a shop, because a cart stays editable after `initiate` (another tab, a
+  slow buyer). Adjust stock from the transaction's items, the list the order is actually made of.
+- **The guest cart `secret` is issued once, by the plugin, when the cart is created.** There is no
+  rotation and this adapter does not add one: anyone holding a copy can prove that cart until it is
+  purchased, which is exactly why it must not travel in a URL, a log line or an analytics event.
+  Keep it where the cart lives and send it only in the request body.
 - Recurring payments, card tokenisation, marketplace transactions and refunds through the API are not implemented.
 
 ## Development
