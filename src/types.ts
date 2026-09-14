@@ -4,6 +4,13 @@ import type { TpayPayer } from './client.js'
 
 export type TpayAdapterArgs = {
   /**
+   * Slug of the carts collection, used to read the cart's `purchasedAt` flag
+   * before a payment is started. The plugin passes its own slug to
+   * `confirmOrder` but not to `initiatePayment`, so a shop that renamed the
+   * collection has to name it here. Defaults to `'carts'`.
+   */
+  cartsSlug?: string
+  /**
    * OAuth client identifier from the Tpay panel (Integration > API).
    * Defaults to `process.env.TPAY_CLIENT_ID`.
    */

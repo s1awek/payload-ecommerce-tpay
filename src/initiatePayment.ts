@@ -48,13 +48,81 @@ export const flattenCartItems = (items: AnyDoc[]): AnyDoc[] =>
     }
   })
 
+/**
+ * Refuses a cart that has already been paid for.
+ *
+ * `purchasedAt` is written by whoever closed the order (the plugin's own
+ * `confirm-order` handler, `finalizeOrder` here), and a cart carrying it has
+ * goods behind it that are already sold. Starting a second payment from the
+ * same cart takes money for them twice, and the customer has no way of telling
+ * the two checkouts apart.
+ *
+ * The flag has to be read from the database rather than trusted to be on the
+ * object handed in: the plugin's `initiate-payment` endpoint loads the cart with
+ * `select: { id, currency, customerEmail, items, subtotal }` (measured on
+ * plugin-ecommerce 3.88.0), so `purchasedAt` is simply not there, and a check
+ * against the passed object alone would never fire.
+ *
+ * A cart that cannot be read at all is not evidence of a second payment, so it
+ * does not block the checkout; it leaves a warning in the log instead. The
+ * plugin loaded the same cart moments earlier, so a failure here is a transient
+ * one, and refusing a real payment over it would be the worse mistake.
+ */
+export const assertCartNotPurchased = async (args: {
+  cart: AnyDoc
+  cartsSlug: string
+  req: PayloadRequest
+}): Promise<void> => {
+  const { cart, cartsSlug, req } = args
+
+  const refuse = (purchasedAt: unknown): never => {
+    throw new Error(
+      `Cart ${String(cart?.id)} was already paid for (purchasedAt: ${String(purchasedAt)}). Create a new cart instead of paying for this one twice.`,
+    )
+  }
+
+  if (cart?.purchasedAt) {
+    refuse(cart.purchasedAt)
+  }
+
+  if (!cart?.id) {
+    return
+  }
+
+  let stored: AnyDoc | undefined
+
+  try {
+    stored = (await req.payload.findByID({
+      id: cart.id,
+      collection: cartsSlug,
+      depth: 0,
+      overrideAccess: true,
+      req,
+      select: { purchasedAt: true },
+    })) as AnyDoc | undefined
+  } catch (error) {
+    req.payload.logger.warn({
+      err: error,
+      msg: `Tpay: cart ${String(cart.id)} could not be read before starting a payment, so its purchasedAt flag was not checked`,
+    })
+
+    return
+  }
+
+  if (stored?.purchasedAt) {
+    refuse(stored.purchasedAt)
+  }
+}
+
 export const initiatePayment =
   (props: TpayAdapterArgs & { client: TpayClient }) =>
   async ({
+    cartsSlug,
     data,
     req,
     transactionsSlug,
   }: {
+    cartsSlug?: string
     customersSlug?: string
     data: {
       billingAddress: any
@@ -68,6 +136,9 @@ export const initiatePayment =
   }) => {
     const payload = req.payload
     const { client, lang, notificationUrl, payerErrorUrl, payerSuccessUrl } = props
+    // The plugin hands `cartsSlug` to `confirmOrder` but not here, so the
+    // adapter option is what a renamed collection travels through.
+    const carts = cartsSlug || props.cartsSlug || 'carts'
 
     const { billingAddress, cart, currency, customerEmail, shippingAddress } = data
     const amount = cart?.subtotal
@@ -106,6 +177,8 @@ export const initiatePayment =
         'A notification URL is required. Set `notificationUrl` on the adapter or NEXT_PUBLIC_SERVER_URL in the environment.',
       )
     }
+
+    await assertCartNotPurchased({ cart, cartsSlug: carts, req })
 
     const items = flattenCartItems(cart.items)
 

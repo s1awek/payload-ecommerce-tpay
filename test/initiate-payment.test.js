@@ -265,3 +265,91 @@ describe('W2-3: the package settles two decimal currencies only', () => {
     assert.equal(isSupportedCurrency('KWD'), false)
   })
 })
+
+// --- audit round 2, 14.09.2026: a cart can only be paid for once (W2-12) ---
+
+describe('W2-12: a cart that has already been paid for cannot start another payment', () => {
+  it('W2-12: the flag is read from the database, because the plugin does not select it', async () => {
+    const payload = new PayloadStub()
+    payload.seed('carts', { id: 'carts-1', purchasedAt: '2026-09-14T10:00:00.000Z' })
+    const { calls, client } = fakeClient()
+
+    const handler = initiatePayment({
+      client,
+      notificationUrl: 'https://sklep.example/api/payments/tpay/notifications',
+    })
+
+    await assert.rejects(
+      handler({
+        // Exactly the shape the plugin passes: no `purchasedAt` on the object,
+        // because its `select` leaves the field out.
+        data: { billingAddress, cart, currency: 'PLN', customerEmail: 'anna@example.pl' },
+        req: makeReq(payload),
+        transactionsSlug: 'transactions',
+      }),
+      /already paid for/,
+    )
+
+    assert.equal(payload.docs('transactions').length, 0, 'no second transaction is opened')
+    assert.equal(calls.length, 0, 'and Tpay is never asked to take the money')
+  })
+
+  it('W2-12: the flag on the passed cart is refused too', async () => {
+    const payload = new PayloadStub()
+    const { calls, client } = fakeClient()
+
+    const handler = initiatePayment({
+      client,
+      notificationUrl: 'https://sklep.example/api/payments/tpay/notifications',
+    })
+
+    await assert.rejects(
+      handler({
+        data: {
+          billingAddress,
+          cart: { ...cart, purchasedAt: '2026-09-14T10:00:00.000Z' },
+          currency: 'PLN',
+          customerEmail: 'anna@example.pl',
+        },
+        req: makeReq(payload),
+        transactionsSlug: 'transactions',
+      }),
+      /already paid for/,
+    )
+
+    assert.equal(payload.docs('transactions').length, 0)
+    assert.equal(calls.length, 0)
+  })
+
+  it('W2-12 known-good: a cart with no purchase behind it goes through', async () => {
+    const payload = new PayloadStub()
+    payload.seed('carts', { id: 'carts-1' })
+    const { calls, client } = fakeClient()
+
+    const handler = initiatePayment({
+      client,
+      notificationUrl: 'https://sklep.example/api/payments/tpay/notifications',
+    })
+
+    const result = await handler({
+      data: { billingAddress, cart, currency: 'PLN', customerEmail: 'anna@example.pl' },
+      req: makeReq(payload),
+      transactionsSlug: 'transactions',
+    })
+
+    assert.equal(calls.length, 1)
+    assert.equal(payload.docs('transactions').length, 1)
+    assert.equal(result.tpayTransactionID, 'TR-1')
+  })
+
+  it('W2-12: a cart that cannot be read warns but does not block a real payment', async () => {
+    // Nothing is seeded into the carts collection, so the read throws - the same
+    // as a cart deleted between the plugin loading it and the adapter looking
+    // again. That is not evidence of a second payment, so the checkout stands.
+    const { calls, payload } = await run()
+
+    assert.equal(calls.length, 1, 'the payment still reaches Tpay')
+    assert.equal(payload.docs('transactions').length, 1)
+    assert.match(String(payload.logs.warn[0]?.msg ?? ''), /purchasedAt flag was not checked/)
+  })
+})
