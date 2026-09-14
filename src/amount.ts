@@ -5,10 +5,27 @@
  * Tpay accepts and returns decimal amounts ("10.99"), and the md5 checksum of a
  * notification is computed over a string formatted to two decimal places.
  *
- * Every conversion runs on integers and strings - never through a float.
- * Dividing 1999 by 100 in floating-point arithmetic yields a value that, once
- * rounded, is sometimes something other than "19.99", and a discrepancy of one
- * grosz breaks the checksum, so the payment is rejected with no readable reason.
+ * Where the arithmetic is exact and where it is not:
+ *
+ * - `minorToDecimalString`, `decimalStringToMinor` and `normalizeAmountString`
+ *   move the decimal point by padding and slicing digit strings. Nothing is
+ *   divided or multiplied, so nothing can arrive at the checksum as
+ *   19.990000000000002 - and a discrepancy of one grosz breaks the md5, after
+ *   which the payment is rejected with no readable reason.
+ * - `apiAmountToMinor` cannot work that way for a REST API response, which
+ *   carries `amount` as a JSON number: the value is already a float by the time
+ *   it reaches this package, so it is scaled by `Math.round(value * 10 **
+ *   decimals)`. That is rounding, not exact arithmetic. For two decimal places
+ *   it is safe across every amount a shop can charge, because the error of the
+ *   product stays orders of magnitude below the half unit `Math.round` would
+ *   need to land on the wrong integer; it is pinned by tests rather than left
+ *   to the reader's trust.
+ * - The amount sent to Tpay is a JSON number too (`Number(minorToDecimalString(...))`
+ *   in `initiatePayment`) - the string is built exactly, and the float only
+ *   exists because that is the shape the API takes.
+ *
+ * All of this assumes a minor unit of two decimal places; `src/currencies.ts`
+ * is what keeps a currency with another exponent out of the package.
  */
 
 const DECIMAL_RE = /^-?\d+(\.\d+)?$/

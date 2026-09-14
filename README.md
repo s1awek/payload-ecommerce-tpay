@@ -138,7 +138,9 @@ A notification endpoint is a public URL, so everything about it assumes someone 
 
 ## Amounts
 
-Payload stores money in minor units (integer grosze), Tpay expects decimals. The conversion is integer and string arithmetic only, never floating point, because a one grosz drift changes the checksum and the payment is rejected with no readable reason.
+Payload stores money in minor units (integer grosze), Tpay expects decimals. On the way out, and for every value that arrives as a string - a notification body, `tr_paid`, `tr_amount` - the conversion is digit shuffling only: strings padded and sliced, nothing divided or multiplied, because a one grosz drift changes the checksum and the payment is rejected with no readable reason.
+
+The REST API is the exception, and it is worth knowing about. `GET /transactions/{id}` returns `amount` as a JSON number, so by the time the value reaches this package it is already a float; `apiAmountToMinor` scales it with `Math.round(value * 10 ** decimals)`. That is rounding rather than exact arithmetic, and for two decimal places it is exact for every amount a shop can realistically charge - the error of the product stays far below the half unit that would round to the wrong integer. `test/amount.test.js` pins the values instead of asking you to take that on trust.
 
 ```ts
 import { minorToDecimalString, decimalStringToMinor } from '@wellmade/payload-ecommerce-tpay'

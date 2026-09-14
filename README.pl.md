@@ -139,7 +139,9 @@ Punkt odbioru powiadomień to publiczny adres, więc wszystko w nim jest napisan
 
 ## Kwoty
 
-Payload trzyma pieniądze w jednostkach podrzędnych (grosze, liczba całkowita), Tpay oczekuje wartości dziesiętnych. Konwersja idzie wyłącznie na liczbach całkowitych i napisach, nigdy przez zmiennoprzecinkowe, bo rozjazd o jeden grosz zmienia sumę kontrolną i płatność zostaje odrzucona bez czytelnego powodu.
+Payload trzyma pieniądze w jednostkach podrzędnych (grosze, liczba całkowita), Tpay oczekuje wartości dziesiętnych. W drodze na zewnątrz i dla każdej wartości, która przychodzi napisem - treść powiadomienia, `tr_paid`, `tr_amount` - konwersja to samo przestawianie cyfr: napisy dopełniane i cięte, nic nie jest dzielone ani mnożone, bo rozjazd o jeden grosz zmienia sumę kontrolną i płatność zostaje odrzucona bez czytelnego powodu.
+
+Wyjątkiem jest REST API i warto o nim wiedzieć. `GET /transactions/{id}` zwraca `amount` jako liczbę JSON, więc do pakietu wartość trafia już zmiennoprzecinkowa; `apiAmountToMinor` skaluje ją przez `Math.round(value * 10 ** decimals)`. To zaokrąglanie, nie arytmetyka ścisła, i przy dwóch miejscach po przecinku jest dokładne dla każdej kwoty, jaką sklep realnie policzy - błąd iloczynu zostaje daleko poniżej połowy jednostki, która zaokrągliłaby się do złej liczby całkowitej. `test/amount.test.js` przypina te wartości, zamiast kazać brać to na słowo.
 
 ```ts
 import { minorToDecimalString, decimalStringToMinor } from '@wellmade/payload-ecommerce-tpay'
