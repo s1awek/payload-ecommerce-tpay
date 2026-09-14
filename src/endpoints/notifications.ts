@@ -75,7 +75,25 @@ export const notificationsEndpoint = (
       return rejectResponse(400)
     }
 
-    if (!isChecksumValid(notification, { merchantId, securityCode })) {
+    let checksumValid: boolean
+
+    try {
+      checksumValid = isChecksumValid(notification, { merchantId, securityCode })
+    } catch (error) {
+      // `tr_amount` goes into the checksum through `normalizeAmountString`,
+      // which throws for anything that is not a plain decimal amount (empty, a
+      // comma, three decimal places). This endpoint is a public URL, so a body
+      // written by hand has to come back as the ordinary refusal rather than as
+      // an unhandled exception the host turns into a 500 with a stack trace.
+      payload.logger.error({
+        err: error,
+        msg: `Tpay: notification for ${String(notification.tr_id)} rejected, its amount could not be read`,
+      })
+
+      return rejectResponse(400)
+    }
+
+    if (!checksumValid) {
       payload.logger.error(
         `Tpay: notification for ${String(notification.tr_id)} rejected, md5 checksum does not match`,
       )
@@ -169,6 +187,20 @@ export const notificationsEndpoint = (
     // ordinary bank transfer it is the payer who types the amount into their
     // bank. An underpayment must not close the order.
     const expectedMinor = Number(transaction.amount)
+
+    if (!Number.isFinite(expectedMinor) || expectedMinor <= 0) {
+      // Fail closed, the same way the API path does (`assertRemoteMatchesTransaction`).
+      // A document whose amount cannot be read is nothing to compare a payment
+      // against, and a comparison that cannot be made must not report "nothing
+      // owing": the previous `Number.isFinite(...) && paid < expected` let any
+      // payment through, however small, on exactly those transactions.
+      payload.logger.error(
+        `Tpay: transaction ${String(transaction.id)} has an unusable amount ${JSON.stringify(transaction.amount)}, so the payment cannot be checked against it. Order not created.`,
+      )
+
+      return okResponse()
+    }
+
     let paidMinor: number
 
     try {
