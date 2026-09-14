@@ -1,5 +1,5 @@
 {
-  "name": "@wellmade/payload-ecommerce-tpay",
+  "name": "@wellmade-online/payload-ecommerce-tpay",
   "version": "0.1.0",
   "description": "Tpay payment adapter for @payloadcms/plugin-ecommerce: BLIK, bank transfers and cards for Polish shops built on Payload CMS 3.",
   "keywords": [

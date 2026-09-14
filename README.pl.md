@@ -1,8 +1,8 @@
-# @wellmade/payload-ecommerce-tpay
+# @wellmade-online/payload-ecommerce-tpay
 
-[![npm](https://img.shields.io/npm/v/@wellmade/payload-ecommerce-tpay.svg)](https://www.npmjs.com/package/@wellmade/payload-ecommerce-tpay)
-[![license](https://img.shields.io/npm/l/@wellmade/payload-ecommerce-tpay.svg)](./LICENSE)
-[![node](https://img.shields.io/node/v/@wellmade/payload-ecommerce-tpay.svg)](https://nodejs.org)
+[![npm](https://img.shields.io/npm/v/@wellmade-online/payload-ecommerce-tpay.svg)](https://www.npmjs.com/package/@wellmade-online/payload-ecommerce-tpay)
+[![license](https://img.shields.io/npm/l/@wellmade-online/payload-ecommerce-tpay.svg)](./LICENSE)
+[![node](https://img.shields.io/node/v/@wellmade-online/payload-ecommerce-tpay.svg)](https://nodejs.org)
 
 Adapter płatności Tpay dla [`@payloadcms/plugin-ecommerce`](https://payloadcms.com). Daje sklepowi na Payload CMS 3 metody płatności, z których realnie korzystają polscy klienci: BLIK, przelewy online (pay-by-link) i karty, na jednym koncie [Tpay](https://tpay.com).
 
@@ -21,7 +21,7 @@ Pakiet powstał i był sprawdzany na Payloadzie i `@payloadcms/plugin-ecommerce`
 ## Instalacja
 
 ```bash
-npm install @wellmade/payload-ecommerce-tpay
+npm install @wellmade-online/payload-ecommerce-tpay
 ```
 
 ## Konfiguracja
@@ -30,7 +30,7 @@ Po stronie serwera, w konfiguracji Payloada:
 
 ```ts
 import { ecommercePlugin } from '@payloadcms/plugin-ecommerce'
-import { tpayAdapter, PLN } from '@wellmade/payload-ecommerce-tpay'
+import { tpayAdapter, PLN } from '@wellmade-online/payload-ecommerce-tpay'
 
 export default buildConfig({
   plugins: [
@@ -70,7 +70,7 @@ access sprawdzające rolę.
 Po stronie przeglądarki, tam gdzie konfigurujesz front sklepu:
 
 ```ts
-import { tpayAdapterClient } from '@wellmade/payload-ecommerce-tpay'
+import { tpayAdapterClient } from '@wellmade-online/payload-ecommerce-tpay'
 
 const paymentMethods = [tpayAdapterClient({ label: 'BLIK, przelew, karta' })]
 ```
@@ -187,7 +187,7 @@ Payload trzyma pieniądze w jednostkach podrzędnych (grosze, liczba całkowita)
 Wyjątkiem jest REST API i warto o nim wiedzieć. `GET /transactions/{id}` zwraca `amount` jako liczbę JSON, więc do pakietu wartość trafia już zmiennoprzecinkowa; `apiAmountToMinor` skaluje ją przez `Math.round(value * 10 ** decimals)`. To zaokrąglanie, nie arytmetyka ścisła, i przy dwóch miejscach po przecinku jest dokładne dla każdej kwoty, jaką sklep realnie policzy - błąd iloczynu zostaje daleko poniżej połowy jednostki, która zaokrągliłaby się do złej liczby całkowitej. `test/amount.test.js` przypina te wartości, zamiast kazać brać to na słowo.
 
 ```ts
-import { minorToDecimalString, decimalStringToMinor } from '@wellmade/payload-ecommerce-tpay'
+import { minorToDecimalString, decimalStringToMinor } from '@wellmade-online/payload-ecommerce-tpay'
 
 minorToDecimalString(1999) // '19.99'
 decimalStringToMinor('19.99') // 1999

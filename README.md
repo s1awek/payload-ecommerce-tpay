@@ -1,8 +1,8 @@
-# @wellmade/payload-ecommerce-tpay
+# @wellmade-online/payload-ecommerce-tpay
 
-[![npm](https://img.shields.io/npm/v/@wellmade/payload-ecommerce-tpay.svg)](https://www.npmjs.com/package/@wellmade/payload-ecommerce-tpay)
-[![license](https://img.shields.io/npm/l/@wellmade/payload-ecommerce-tpay.svg)](./LICENSE)
-[![node](https://img.shields.io/node/v/@wellmade/payload-ecommerce-tpay.svg)](https://nodejs.org)
+[![npm](https://img.shields.io/npm/v/@wellmade-online/payload-ecommerce-tpay.svg)](https://www.npmjs.com/package/@wellmade-online/payload-ecommerce-tpay)
+[![license](https://img.shields.io/npm/l/@wellmade-online/payload-ecommerce-tpay.svg)](./LICENSE)
+[![node](https://img.shields.io/node/v/@wellmade-online/payload-ecommerce-tpay.svg)](https://nodejs.org)
 
 Tpay payment adapter for [`@payloadcms/plugin-ecommerce`](https://payloadcms.com). Gives a Payload CMS 3 shop the payment methods Polish customers actually use: BLIK, online bank transfers (pay-by-link) and cards, through a single [Tpay](https://tpay.com) account.
 
@@ -21,7 +21,7 @@ Developed and tested against Payload and `@payloadcms/plugin-ecommerce` 3.88.0. 
 ## Install
 
 ```bash
-npm install @wellmade/payload-ecommerce-tpay
+npm install @wellmade-online/payload-ecommerce-tpay
 ```
 
 ## Configure
@@ -30,7 +30,7 @@ Server side, in your Payload config:
 
 ```ts
 import { ecommercePlugin } from '@payloadcms/plugin-ecommerce'
-import { tpayAdapter, PLN } from '@wellmade/payload-ecommerce-tpay'
+import { tpayAdapter, PLN } from '@wellmade-online/payload-ecommerce-tpay'
 
 export default buildConfig({
   plugins: [
@@ -69,7 +69,7 @@ accept orders from anyone. Keep the plugin defaults, or write access functions t
 Client side, wherever you configure the storefront:
 
 ```ts
-import { tpayAdapterClient } from '@wellmade/payload-ecommerce-tpay'
+import { tpayAdapterClient } from '@wellmade-online/payload-ecommerce-tpay'
 
 const paymentMethods = [tpayAdapterClient({ label: 'BLIK, transfer, card' })]
 ```
@@ -186,7 +186,7 @@ Payload stores money in minor units (integer grosze), Tpay expects decimals. On 
 The REST API is the exception, and it is worth knowing about. `GET /transactions/{id}` returns `amount` as a JSON number, so by the time the value reaches this package it is already a float; `apiAmountToMinor` scales it with `Math.round(value * 10 ** decimals)`. That is rounding rather than exact arithmetic, and for two decimal places it is exact for every amount a shop can realistically charge - the error of the product stays far below the half unit that would round to the wrong integer. `test/amount.test.js` pins the values instead of asking you to take that on trust.
 
 ```ts
-import { minorToDecimalString, decimalStringToMinor } from '@wellmade/payload-ecommerce-tpay'
+import { minorToDecimalString, decimalStringToMinor } from '@wellmade-online/payload-ecommerce-tpay'
 
 minorToDecimalString(1999) // '19.99'
 decimalStringToMinor('19.99') // 1999
