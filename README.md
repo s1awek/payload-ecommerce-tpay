@@ -149,20 +149,24 @@ decimalStringToMinor('19.99') // 1999
 
 ## Known limitations
 
-- **Inventory is decremented by the plugin's `confirm-order` endpoint, not by the adapter.** If the
-  notification finishes an order and the customer never returns to the shop, stock is not adjusted for
-  that order. The adapter deliberately does not adjust it either, because the browser path would then
-  decrement a second time. Reconciling that case is on the shop for now.
+- **Inventory is decremented by the plugin's `confirm-order` endpoint, and only when the buyer comes
+  back.** The plugin's handler decrements stock whenever the adapter's answer carries a
+  `transactionID`, and it has no idempotency gate of its own: measured against plugin-ecommerce
+  3.88.0 on a live instance, two identical `confirm-order` calls for one already confirmed
+  transaction took stock from 5 to 4 to 3. The adapter now hands that trigger out **at most once per
+  transaction**. The claim is a conditional write of `tpay.stockClaimedAt` on the transaction
+  document, so only the call that wins it gets `transactionID` back; a reloaded return page, a second
+  browser tab or a hand written `curl` all get the same answer with no trigger in it, and stock stays
+  put. Which path closed the order makes no difference: the buyer's first `confirm-order`, a repeated
+  one, and a notification that finished the order before the browser returned all go through the same
+  claim.
 
-- **That decrement has no idempotency gate, so guard the return page yourself.** Measured against
-  plugin-ecommerce 3.88.0 on a live instance: two identical `confirm-order` calls for one already
-  confirmed transaction took stock from 5 to 4 to 3. The adapter behaves correctly in both calls,
-  answering `Order already confirmed` and creating no second order; the plugin's handler decrements
-  once per call regardless, because it acts on the returned `transactionID`. A customer who reloads
-  the checkout return page therefore removes another unit of stock each time. Until this is fixed
-  upstream, a shop should call `confirm-order` at most once per transaction, for example by
-  redirecting away from the return URL after the first response, or by recording on the order that
-  the return path has already run.
+- **The flip side of that is deliberate: a payment finished only by the notification adjusts no
+  stock.** If the customer pays and never returns to the shop, nothing calls `confirm-order`, so the
+  plugin's decrement never runs. The adapter does not decrement on the notification path either,
+  because then a buyer who did come back would take a second unit off the shelf. Reconciling that
+  case is on the shop, and `tpay.stockClaimedAt` is the field to look at: a succeeded transaction
+  with an order and no `stockClaimedAt` is one whose stock nobody adjusted.
 - **A BLIK checkout adjusts no stock at all unless you do it.** The two limitations above are about
   `confirm-order` running too often; this one is the opposite. BLIK level 0 never returns the browser
   anywhere, so a checkout built on `/blik` and `/blik-status` alone never calls `confirm-order` and

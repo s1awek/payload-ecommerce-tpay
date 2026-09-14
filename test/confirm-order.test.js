@@ -238,3 +238,91 @@ describe('order confirmation after the payer returns', () => {
     )
   })
 })
+
+// --- audit round 2, 14.09.2026: the stock decrement trigger ---
+//
+// The contract with the layer above: the plugin's handler decrements inventory
+// whenever the adapter's answer carries `transactionID`
+// (`dist/endpoints/confirmOrder.js`, the `if (paymentResponse.transactionID)`
+// branch). So exactly one answer per transaction may carry it.
+
+describe('W2-1: the stock decrement trigger is handed out at most once', () => {
+  it('W2-1: a repeated confirmation does not hand the layer above another decrement trigger', async () => {
+    const payload = new PayloadStub()
+    seed(payload)
+    const { client } = clientReturning('correct')
+    const handler = confirmOrder({ client })
+    const data = { secret: SECRET, transactionID: 'transactions-1' }
+
+    const first = await handler({ data, req: makeReq(payload) })
+    const second = await handler({ data, req: makeReq(payload) })
+    const third = await handler({ data, req: makeReq(payload) })
+
+    assert.equal(first.message, 'Order confirmed successfully')
+    assert.ok(first.transactionID, 'the first confirmation decrements stock exactly once')
+
+    for (const repeat of [second, third]) {
+      assert.equal(repeat.message, 'Order already confirmed')
+      assert.equal(repeat.orderID, first.orderID, 'the same order, not a second one')
+      assert.equal(
+        repeat.transactionID,
+        undefined,
+        'the plugin decrements stock whenever the answer carries transactionID',
+      )
+    }
+
+    assert.equal(payload.docs('orders').length, 1)
+    assert.ok(payload.docs('transactions')[0].tpay.stockClaimedAt, 'the claim is recorded on the transaction')
+    assert.equal(
+      payload.docs('transactions')[0].tpay.transactionId,
+      'TR-1',
+      'claiming the trigger does not cost the transaction its Tpay handle',
+    )
+  })
+
+  it('W2-1: the notification closed the order first, the buyer then decrements exactly once', async () => {
+    const payload = new PayloadStub()
+    // The server-to-server notification got there first: the order exists and
+    // the transaction is closed before the browser ever comes back.
+    payload.seed('orders', { id: 'orders-1', accessToken: 'owner-token' })
+    seed(payload, { order: 'orders-1', status: 'succeeded' })
+    const { client } = clientReturning('correct')
+    const handler = confirmOrder({ client })
+    const data = { secret: SECRET, transactionID: 'transactions-1' }
+
+    const first = await handler({ data, req: makeReq(payload) })
+    const second = await handler({ data, req: makeReq(payload) })
+
+    assert.equal(first.message, 'Order already confirmed')
+    assert.equal(first.transactionID, 'transactions-1', 'stock still has to come off once')
+    assert.equal(first.accessToken, 'owner-token')
+    assert.equal(second.transactionID, undefined, 'and only once')
+    assert.equal(payload.docs('orders').length, 1)
+  })
+
+  it('W2-1: a claim that cannot be written hands out no trigger at all', async () => {
+    // known-bad: a decrement that happened twice cannot be undone automatically,
+    // a decrement that never happened is visible in the panel.
+    const payload = new PayloadStub()
+    seed(payload)
+    const { client } = clientReturning('correct')
+
+    const update = payload.update.bind(payload)
+    payload.update = async (args) => {
+      if (args.collection === 'transactions' && args.data?.tpay) {
+        throw new Error('write refused')
+      }
+
+      return await update(args)
+    }
+
+    const result = await confirmOrder({ client })({
+      data: { secret: SECRET, transactionID: 'transactions-1' },
+      req: makeReq(payload),
+    })
+
+    assert.equal(result.message, 'Order confirmed successfully')
+    assert.equal(result.transactionID, undefined)
+    assert.match(String(payload.logs.error[0]?.msg), /could not claim the stock decrement trigger/)
+  })
+})

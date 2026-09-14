@@ -285,7 +285,9 @@ async function payOnTpay() {
   } catch (e) { alert('Could not create the payment: ' + e.message); $('btn-tpay').disabled = false; }
 }
 
-/** Return from the Tpay page: confirm-order exactly ONCE per transaction (the plugin decrements stock on every call). */
+/** Return from the Tpay page. The adapter hands the plugin its stock decrement trigger at most once
+ *  per transaction, so a reload cannot take a second unit off the shelf. This guard stays anyway: it
+ *  saves a pointless round trip and keeps the demo honest about what a shop should do itself. */
 async function handleReturn(route) {
   payment = JSON.parse(sessionStorage.getItem('payment') || 'null');
   show('payment'); $('p-title').textContent = 'Return from the Tpay page';
@@ -293,7 +295,7 @@ async function handleReturn(route) {
   if (route === '/error') { setStatus('error', '<b>Payment failed or was interrupted.</b> Tpay sent us back to the error address.'); finish(); return; }
   const key = 'confirmed:' + payment.transactionID;
   if (sessionStorage.getItem(key)) {
-    setStatus('warn', '<b>Return page reloaded.</b> confirm-order is not called a second time (protects stock from being decremented twice). Below is the state from the database.');
+    setStatus('warn', '<b>Return page reloaded.</b> confirm-order is not called a second time; the adapter would refuse to hand out the stock decrement trigger again anyway. Below is the state from the database.');
     finish(); return;
   }
   setStatus('waiting', 'Checking the payment status with Tpay<span class="dots"></span>');

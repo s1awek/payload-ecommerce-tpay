@@ -21,6 +21,68 @@ export const TPAY_STATUS_PAID = 'correct'
  */
 const FAILED_STATUSES = new Set(['declined', 'error', 'expired', 'rejected'])
 
+/**
+ * Hands out the stock decrement trigger at most once per transaction.
+ *
+ * The plugin's `confirm-order` handler decrements inventory whenever the
+ * adapter's answer carries `transactionID`
+ * (`@payloadcms/plugin-ecommerce/dist/endpoints/confirmOrder.js`: the
+ * `if (paymentResponse.transactionID)` branch). Its own attempt to strip that
+ * key afterwards tests the literal string `'paymentResponse.transactionID'`,
+ * so it never fires, and the adapter used to answer with `transactionID` on
+ * every call - including the "already confirmed" one. Measured on a live
+ * instance: two identical calls took stock from 5 to 4 to 3.
+ *
+ * So the idempotency gate has to live here. A conditional update claims
+ * `tpay.stockClaimedAt` on the transaction, and only the call that wins the
+ * claim gets `transactionID` back. Which path created the order does not
+ * matter: the buyer's first confirmation, a repeated one, or a notification
+ * that closed the order before the browser came back all go through the same
+ * claim.
+ *
+ * A claim that cannot be written hands out nothing. Stock decremented twice
+ * cannot be recovered automatically; stock not decremented at all is visible
+ * in the panel and is already a documented limitation of this adapter.
+ */
+const claimStockTrigger = async (args: {
+  req: PayloadRequest
+  transaction: AnyDoc
+  transactionsSlug: string
+}): Promise<boolean> => {
+  const { req, transaction, transactionsSlug } = args
+
+  try {
+    const claimed = await req.payload.update({
+      collection: transactionsSlug,
+      // The whole group is rewritten rather than the one field: a partial group
+      // write is not the same thing across database adapters, and losing
+      // `tpay.transactionId` here would cost the transaction its handle on Tpay.
+      data: {
+        tpay: {
+          ...(transaction.tpay && typeof transaction.tpay === 'object' ? transaction.tpay : {}),
+          stockClaimedAt: new Date().toISOString(),
+        },
+      },
+      req,
+      where: {
+        and: [
+          { id: { equals: transaction.id } },
+          { 'tpay.stockClaimedAt': { exists: false } },
+        ],
+      },
+    })
+
+    return Array.isArray(claimed?.docs) && claimed.docs.length > 0
+  } catch (error) {
+    req.payload.logger.error({
+      err: error,
+      msg: `Tpay: could not claim the stock decrement trigger for transaction ${String(transaction.id)}; the shop has to adjust stock itself`,
+    })
+
+    return false
+  }
+}
+
 export const confirmOrder =
   (props: TpayAdapterArgs & { client: TpayClient }) =>
   async ({
@@ -85,10 +147,14 @@ export const confirmOrder =
           transactionsSlug,
         })
 
+        const claimedStock = await claimStockTrigger({ req, transaction, transactionsSlug })
+
         return {
           message: 'Order already confirmed',
           orderID: finished.order?.id,
-          transactionID: transaction.id,
+          // `transactionID` is what makes the layer above decrement stock, so
+          // it only goes out to the call that won the claim.
+          ...(claimedStock ? { transactionID: transaction.id } : {}),
           ...(finished.order?.accessToken ? { accessToken: finished.order.accessToken } : {}),
         }
       }
@@ -145,10 +211,14 @@ export const confirmOrder =
         throw new Error(finished.reason || 'Order could not be created for this transaction.')
       }
 
+      const claimedStock = await claimStockTrigger({ req, transaction, transactionsSlug })
+
       return {
         message: 'Order confirmed successfully',
         orderID: finished.order.id,
-        transactionID: transaction.id,
+        // Same claim as in the "already confirmed" branch above: at most one
+        // call per transaction ever carries the decrement trigger.
+        ...(claimedStock ? { transactionID: transaction.id } : {}),
         ...(finished.order.accessToken ? { accessToken: finished.order.accessToken } : {}),
       }
     } catch (error) {

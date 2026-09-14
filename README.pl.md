@@ -150,20 +150,24 @@ decimalStringToMinor('19.99') // 1999
 
 ## Znane ograniczenia
 
-- **Stan magazynowy zdejmuje punkt `confirm-order` z wtyczki, nie adapter.** Jeśli zamówienie domknie
-  powiadomienie, a klient nigdy nie wróci do sklepu, stan magazynowy nie zostanie dla niego
-  skorygowany. Adapter świadomie też go nie rusza, bo wtedy ścieżka przeglądarki zdjęłaby towar
-  drugi raz. Na dziś domknięcie tego przypadku jest po stronie sklepu.
+- **Stan magazynowy zdejmuje punkt `confirm-order` z wtyczki i tylko wtedy, gdy kupujący wróci.**
+  Handler wtyczki zdejmuje towar zawsze, gdy odpowiedź adaptera niesie `transactionID`, i sam nie ma
+  żadnego zabezpieczenia przed powtórzeniem: zmierzone na żywej instancji z plugin-ecommerce 3.88.0,
+  dwa identyczne wywołania `confirm-order` dla jednej, już domkniętej transakcji zdjęły stan z 5 na 4,
+  a potem na 3. Adapter wydaje teraz ten wyzwalacz **najwyżej raz na transakcję**. Rezerwacja to
+  warunkowy zapis `tpay.stockClaimedAt` na dokumencie transakcji, więc `transactionID` dostaje
+  wyłącznie to wywołanie, które ją wygrało; odświeżona strona powrotu, druga karta przeglądarki
+  i ręcznie napisany `curl` dostają tę samą odpowiedź bez wyzwalacza, a stan zostaje na miejscu. Nie
+  ma przy tym znaczenia, która droga domknęła zamówienie: pierwsze `confirm-order` kupującego,
+  powtórzone i powiadomienie, które zamknęło zamówienie przed powrotem przeglądarki, przechodzą przez
+  tę samą rezerwację.
 
-- **To zdejmowanie nie ma zabezpieczenia przed powtórzeniem, więc stronę powrotu trzeba osłonić
-  samemu.** Zmierzone na żywej instancji z plugin-ecommerce 3.88.0: dwa identyczne wywołania
-  `confirm-order` dla jednej, już domkniętej transakcji zdjęły stan z 5 na 4, a potem na 3. Adapter
-  w obu wywołaniach zachowuje się poprawnie, odpowiada `Order already confirmed` i nie tworzy
-  drugiego zamówienia; handler wtyczki i tak zdejmuje towar raz na każde wywołanie, bo działa na
-  zwróconym `transactionID`. Klient, który odświeży stronę powrotu z kasy, za każdym razem zabiera
-  więc kolejną sztukę ze stanu. Dopóki nie zostanie to naprawione w samej wtyczce, sklep powinien
-  wołać `confirm-order` najwyżej raz na transakcję: na przykład przekierowując z adresu powrotu po
-  pierwszej odpowiedzi albo zapisując na zamówieniu, że ścieżka powrotu już się wykonała.
+- **Druga strona tego jest świadoma: płatność domknięta wyłącznie powiadomieniem nie rusza stanu.**
+  Jeśli klient zapłaci i nigdy nie wróci do sklepu, nic nie wywoła `confirm-order`, więc zdejmowanie
+  stanu we wtyczce się nie wykona. Adapter nie zdejmuje stanu również w torze powiadomień, bo wtedy
+  kupujący, który jednak wrócił, zabrałby drugą sztukę. Domknięcie tego przypadku jest po stronie
+  sklepu, a polem do sprawdzenia jest `tpay.stockClaimedAt`: transakcja `succeeded` z zamówieniem
+  i bez `stockClaimedAt` to taka, której stanu nikt nie skorygował.
 - **Kasa na BLIK-u nie rusza stanu magazynowego w ogóle, dopóki sklep nie zrobi tego sam.** Dwa
   ograniczenia wyżej mówią o `confirm-order` wywoływanym zbyt często, to jest odwrotne. BLIK 0 nigdy
   nie odsyła przeglądarki nigdzie, więc kasa zbudowana wyłącznie na `/blik` i `/blik-status` nie

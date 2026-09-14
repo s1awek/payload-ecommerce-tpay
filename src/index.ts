@@ -86,6 +86,17 @@ export const tpayAdapter = (props: TpayAdapterArgs = {}): PaymentAdapter => {
       admin: { readOnly: true },
       label: 'Shipping address snapshot',
     },
+    {
+      name: 'stockClaimedAt',
+      type: 'date',
+      admin: { readOnly: true },
+      // The plugin's `confirm-order` handler decrements inventory whenever the
+      // adapter's answer carries `transactionID`, and it does so on every call.
+      // This field is the adapter's claim on that trigger: the first
+      // confirmation to write it is the only one that gets `transactionID`
+      // back. See `claimStockTrigger` in `src/confirmOrder.ts`.
+      label: 'Stock decrement trigger handed out at',
+    },
   ]
 
   const groupField: GroupField = {
@@ -104,7 +115,13 @@ export const tpayAdapter = (props: TpayAdapterArgs = {}): PaymentAdapter => {
 
   return {
     name: TPAY_PAYMENT_METHOD,
-    confirmOrder: confirmOrder(resolved),
+    // The plugin's `ConfirmOrderReturnType` declares `transactionID` required,
+    // but that key is what makes its handler decrement inventory, so an answer
+    // that must not decrement anything a second time has to omit it (W2-1).
+    // The handler itself reads the field as `if (paymentResponse.transactionID)`,
+    // so an absent key is a case it already handles. The cast sits here, once,
+    // with the reason next to it.
+    confirmOrder: confirmOrder(resolved) as PaymentAdapter['confirmOrder'],
     // The BLIK endpoints stand ALONGSIDE the plugin's endpoints, not instead
     // of them, and deliberately do not go through its `confirm-order`: that one
     // decrements stock on every call, while BLIK 0 requires polling the state
