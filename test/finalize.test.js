@@ -134,6 +134,91 @@ describe('closing the order', () => {
     assert.equal(payload.docs('transactions')[0].order, 'orders-winner')
   })
 
+  it('W2-4: a transaction outside pending still gets its order instead of losing it silently', async () => {
+    const payload = new PayloadStub()
+    payload.seed('carts', { id: 'carts-1' })
+    // A settled refusal recorded earlier by confirm-order, then a late transfer.
+    const transaction = seedTransaction(payload, { status: 'failed' })
+
+    const result = await finalizeOrder({
+      req: makeReq(payload),
+      transaction,
+      transactionsSlug: 'transactions',
+    })
+
+    assert.ok(result.order, 'money in with no order is worse than an order on a failed transaction')
+    assert.equal(payload.docs('orders').length, 1, 'the order was not deleted')
+    assert.equal(
+      String(payload.docs('transactions')[0].order),
+      String(result.order.id),
+      'the transaction points at that order',
+    )
+    assert.equal(payload.docs('transactions')[0].status, 'succeeded')
+  })
+
+  it('W2-4: a conditional write nobody won keeps the order and attaches it unconditionally', async () => {
+    const payload = new PayloadStub()
+    payload.seed('carts', { id: 'carts-1' })
+    const transaction = seedTransaction(payload)
+
+    // `payload.update` with a `where` answers `{ docs, errors }`, and a write
+    // refused by validation lands in `errors`. From here that is indistinguishable
+    // from losing a race, which is exactly the case that used to delete a real
+    // paid order.
+    const update = payload.update.bind(payload)
+    let refused = false
+    payload.update = async (args) => {
+      if (!refused && args.collection === 'transactions' && args.where) {
+        refused = true
+
+        return { docs: [], errors: [{ id: 'transactions-1', message: 'write refused' }] }
+      }
+
+      return await update(args)
+    }
+
+    const result = await finalizeOrder({
+      req: makeReq(payload),
+      transaction,
+      transactionsSlug: 'transactions',
+    })
+
+    assert.ok(result.order)
+    assert.equal(payload.docs('orders').length, 1, 'nothing was deleted, there was no winner to lose to')
+    assert.equal(String(payload.docs('transactions')[0].order), String(result.order.id))
+  })
+
+  it('W2-4: a refunded transaction gets the order attached but is not reported as succeeded again', async () => {
+    const payload = new PayloadStub()
+    payload.seed('carts', { id: 'carts-1' })
+    const transaction = seedTransaction(payload, { status: 'refunded' })
+
+    const update = payload.update.bind(payload)
+    let refused = false
+    payload.update = async (args) => {
+      if (!refused && args.collection === 'transactions' && args.where) {
+        refused = true
+
+        return { docs: [], errors: [{ id: 'transactions-1', message: 'write refused' }] }
+      }
+
+      return await update(args)
+    }
+
+    const result = await finalizeOrder({
+      req: makeReq(payload),
+      transaction,
+      transactionsSlug: 'transactions',
+    })
+
+    assert.equal(String(payload.docs('transactions')[0].order), String(result.order.id))
+    assert.equal(
+      payload.docs('transactions')[0].status,
+      'refunded',
+      'a refund is a fact later than the payment',
+    )
+  })
+
   it('a failed cart marking does not break the order', async () => {
     const payload = new PayloadStub()
     const transaction = seedTransaction(payload)

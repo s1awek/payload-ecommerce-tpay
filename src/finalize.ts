@@ -41,13 +41,27 @@ const idOf = (value: unknown): string | undefined => {
  * moment the customer's browser is coming back to the shop page.
  *
  * The ordering is the reverse of the intuitive one, and that is the most
- * important thing about it: the order is created BEFORE the transaction status
- * is switched. A conditional update (`status: pending` -> `succeeded`) decides
- * who won; the loser deletes its freshly created order, which nobody has seen
- * yet, and returns the winner's order. Were it the other way round (status
- * first, order second), a failure between the one and the other would leave a
- * transaction paid with no order and no way out - a state with no automatic
- * recovery.
+ * important thing about it: the order is created BEFORE the transaction is
+ * updated. Were it the other way round (status first, order second), a failure
+ * between the one and the other would leave a transaction paid with no order
+ * and no way out - a state with no automatic recovery.
+ *
+ * The winner is whoever attaches an order first: the conditional update asks
+ * for `order` to be unset, NOT for the status to be `pending`. The difference
+ * matters, and it used to cost real payments. A status condition loses in two
+ * different situations that look identical from here - "somebody else finished
+ * this order" and "the status had already moved on for reasons of its own" (a
+ * settled refusal recorded by `confirm-order`, a chargeback on a transaction
+ * that never had an order) - and the second one is not a race at all. The
+ * loser then deleted an order nobody else had created, and a real, paid
+ * notification ended as one line in the log.
+ *
+ * So a lost conditional write is never acted on blind: we read the transaction
+ * back first. If somebody really did win, we delete our own order, which nobody
+ * has seen yet, and return theirs. If nobody did, the payment is real and the
+ * order already exists, so the only thing missing is the link - we write it
+ * unconditionally rather than throw the order away. Money in with no order is
+ * the worst outcome available here.
  *
  * What this does NOT guarantee. `payload.update` with a `where` is not an
  * atomic compare-and-swap: Payload runs a `db.find` and only then writes per
@@ -116,47 +130,76 @@ export async function finalizeOrder(args: FinalizeArgs): Promise<FinalizeResult>
     },
     req,
     where: {
-      and: [{ id: { equals: transaction.id } }, { status: { equals: 'pending' } }],
+      and: [{ id: { equals: transaction.id } }, { order: { exists: false } }],
     },
   })
 
   const won = Array.isArray(claimed?.docs) && claimed.docs.length > 0
 
   if (!won) {
-    // Somebody else closed this transaction at the same moment. We delete our
-    // own order before anyone sees it and return the one that remained.
+    // Read before destroying anything: a lost conditional write does not by
+    // itself say that somebody else won.
+    let fresh: AnyDoc | undefined
+
     try {
-      await payload.delete({ id: order.id, collection: ordersSlug, req })
+      fresh = (await payload.findByID({
+        id: transaction.id,
+        collection: transactionsSlug,
+        req,
+      })) as AnyDoc
     } catch (error) {
       payload.logger.error({
         err: error,
-        msg: `Tpay: could not remove the duplicate order ${String(order.id)} after losing the finalisation race`,
+        msg: `Tpay: could not read transaction ${String(transaction.id)} back after the conditional write did not apply`,
       })
     }
 
-    const fresh = (await payload.findByID({
-      id: transaction.id,
-      collection: transactionsSlug,
-      req,
-    })) as AnyDoc
-
     const winnerOrderID = idOf(fresh?.order)
 
-    if (!winnerOrderID) {
-      return {
-        created: false,
-        order: null,
-        reason: 'Transaction was finalised concurrently but carries no order',
+    if (winnerOrderID) {
+      // A real race: somebody else attached their order at the same moment. We
+      // delete our own, which nobody has seen yet, and return theirs.
+      try {
+        await payload.delete({ id: order.id, collection: ordersSlug, req })
+      } catch (error) {
+        payload.logger.error({
+          err: error,
+          msg: `Tpay: could not remove the duplicate order ${String(order.id)} after losing the finalisation race`,
+        })
       }
+
+      const winnerOrder = await payload.findByID({
+        id: winnerOrderID,
+        collection: ordersSlug,
+        req,
+      })
+
+      return { created: false, order: winnerOrder as AnyDoc }
     }
 
-    const winnerOrder = await payload.findByID({
-      id: winnerOrderID,
-      collection: ordersSlug,
-      req,
-    })
+    // Nobody won. The payment is verified and the order exists; only the link
+    // is missing. A transaction sitting in a terminal status (a settled refusal
+    // followed by a late transfer) must not cost the buyer their order.
+    const freshStatus = String(fresh?.status ?? '')
 
-    return { created: false, order: winnerOrder as AnyDoc }
+    try {
+      await payload.update({
+        id: transaction.id,
+        collection: transactionsSlug,
+        // A refund is a fact later than the payment, so the order is attached
+        // but the transaction is not reported as succeeded all over again.
+        data:
+          freshStatus === 'refunded'
+            ? { order: order.id }
+            : { order: order.id, status: 'succeeded' },
+        req,
+      })
+    } catch (error) {
+      payload.logger.error({
+        err: error,
+        msg: `Tpay: order ${String(order.id)} was created for transaction ${String(transaction.id)} but could not be attached to it - reconcile by hand`,
+      })
+    }
   }
 
   const cartID = idOf(transaction.cart)

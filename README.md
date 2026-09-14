@@ -179,7 +179,7 @@ decimalStringToMinor('19.99') // 1999
 - **A chargeback changes the transaction, not the order.** A `CHARGEBACK` notification sets the
   transaction to `refunded` and leaves the order in `processing`. A shop that watches orders alone
   will not see that the money went back; watch the transaction status, or add a hook that mirrors it.
-- **Finishing an order is not an atomic compare and swap.** `payload.update` with a `where` clause is a find followed by a per-document write, so there is a narrow window in which the notification and the browser both believe they finished the order. The result is an orphaned order document, never a double charge, since there is only ever one payment. Closing the window would mean bypassing collection hooks, which is the worse trade.
+- **Finishing an order is not an atomic compare and swap.** `payload.update` with a `where` clause is a find followed by a per-document write, so there is a narrow window in which the notification and the browser both believe they finished the order. The result is an orphaned order document, never a double charge, since there is only ever one payment. Closing the window would mean bypassing collection hooks, which is the worse trade. The race is decided by whoever attaches an order first, not by the transaction status: a transaction that already has an order gets that same order back, and a transaction with no order gets one on a verified paid notification even when its status has already moved somewhere else, because a settled refusal followed by a late transfer must not cost the buyer their order.
 - Recurring payments, card tokenisation, marketplace transactions and refunds through the API are not implemented.
 
 ## Development

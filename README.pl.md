@@ -182,7 +182,7 @@ decimalStringToMinor('19.99') // 1999
   na `refunded`, a zamówienie zostawia w stanie `processing`. Sklep, który obserwuje wyłącznie
   zamówienia, nie zobaczy, że pieniądze wróciły - obserwuj status transakcji albo dodaj hak, który
   go odzwierciedla.
-- **Domknięcie zamówienia nie jest atomowym compare-and-swap.** `payload.update` z warunkiem `where` to wyszukanie, a dopiero potem zapis po dokumencie, więc zostaje wąskie okno, w którym powiadomienie i przeglądarka uznają się jednocześnie za tego, kto domknął zamówienie. Skutkiem jest osierocony dokument zamówienia, nigdy podwójne obciążenie, bo płatność jest jedna. Domknięcie okna oznaczałoby ominięcie haków kolekcji, co jest gorszym wyborem.
+- **Domknięcie zamówienia nie jest atomowym compare-and-swap.** `payload.update` z warunkiem `where` to wyszukanie, a dopiero potem zapis po dokumencie, więc zostaje wąskie okno, w którym powiadomienie i przeglądarka uznają się jednocześnie za tego, kto domknął zamówienie. Skutkiem jest osierocony dokument zamówienia, nigdy podwójne obciążenie, bo płatność jest jedna. Domknięcie okna oznaczałoby ominięcie haków kolekcji, co jest gorszym wyborem. O zwycięstwie decyduje to, kto pierwszy przypnie zamówienie, a nie status transakcji: transakcja, która już ma zamówienie, dostaje z powrotem to samo, a transakcja bez zamówienia dostaje je na zweryfikowane powiadomienie o zapłacie także wtedy, gdy jej status zdążył się zmienić, bo rozliczona odmowa i późniejsza wpłata nie mogą kosztować kupującego zamówienia.
 - Płatności cykliczne, tokenizacja kart, transakcje marketplace i zwroty przez API nie są zaimplementowane.
 
 ## Praca nad pakietem
