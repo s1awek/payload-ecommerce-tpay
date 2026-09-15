@@ -14,6 +14,7 @@
  * instead of it. Both listen on 8099 and cannot run at the same time.
  */
 import http from 'node:http'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -29,6 +30,58 @@ const sanitized = payload.config
 const apiPrefix = sanitized.routes?.api || '/api'
 
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), ...a)
+
+// --- access gate -----------------------------------------------------------------
+// This host is reachable from the internet whenever it runs behind a tunnel, because Tpay
+// delivers the payment result as a server to server request and a local address never gets
+// one. That same tunnel lets anyone who learns the address call `initiate` and mint sandbox
+// transactions on OUR credentials. A random tunnel hostname is obscurity, not a control, so
+// the shop asks for a password and keeps the answer in a session cookie.
+//
+// Two routes stay open by design:
+//   - the notification endpoint, because Tpay has no password and authenticates itself with
+//     the JWS signature and the md5 checksum the adapter already verifies;
+//   - `/health`, so a tunnel check does not need the password.
+// Everything else - the page, the catalogue, the cart, initiate, blik - is behind the gate.
+//
+// DEV_SHOP_PASSWORD unset means the gate is off. That is fine on a local address and logged
+// as a warning when a public one is configured.
+const SHOP_PASSWORD = process.env.DEV_SHOP_PASSWORD || ''
+const SESSION_COOKIE = 'dev_shop_session'
+// New secret on every start: a restart invalidates old cookies, and nothing is written to disk.
+const SESSION_SECRET = randomBytes(32).toString('hex')
+
+const sameSecret = (a: string, b: string) => {
+  const x = Buffer.from(a)
+  const y = Buffer.from(b)
+  return x.length === y.length && timingSafeEqual(x, y)
+}
+
+const hasSession = (req: http.IncomingMessage) => {
+  const raw = req.headers.cookie || ''
+  for (const part of raw.split(';')) {
+    const [k, ...rest] = part.trim().split('=')
+    if (k === SESSION_COOKIE) return sameSecret(rest.join('='), SESSION_SECRET)
+  }
+  return false
+}
+
+const isPublicRoute = (method: string, pathname: string) =>
+  (method === 'POST' && pathname === `${apiPrefix}/payments/tpay/notifications`) ||
+  (method === 'GET' && pathname === '/health')
+
+const LOGIN_PAGE = (wrong: boolean) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Demo shop</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font:16px system-ui;margin:0;display:grid;place-items:center;min-height:100vh;background:#f6f6f7}
+form{background:#fff;padding:2rem;border-radius:12px;box-shadow:0 1px 4px #0002;display:grid;gap:.75rem;width:min(22rem,90vw)}
+h1{font-size:1.1rem;margin:0}p{margin:0;color:#666;font-size:.85rem}
+input,button{font:inherit;padding:.6rem;border-radius:8px;border:1px solid #ccc}
+button{background:#111;color:#fff;border:0;cursor:pointer}.bad{color:#b00}</style></head>
+<body><form method="POST" action="/shop/login"><h1>Demo shop (Tpay sandbox)</h1>
+<p>Development host. The password is in <code>DEV_SHOP_PASSWORD</code>.</p>
+${wrong ? '<p class="bad">Wrong password.</p>' : ''}
+<input type="password" name="password" autocomplete="current-password" autofocus required>
+<button type="submit">Enter</button></form></body></html>`
 
 // --- seed: three demo products, created once -------------------------------------
 const DEMO_PRODUCTS = [
@@ -248,6 +301,34 @@ const server = http.createServer(async (nodeReq, nodeRes) => {
   const url = new URL(nodeReq.url || '/', `http://localhost:${PORT}`)
   const method = nodeReq.method || 'GET'
   try {
+    if (method === 'GET' && url.pathname === '/health') return json(nodeRes, 200, { ok: true })
+
+    // The gate runs before routing, so a new route cannot be added outside it by accident.
+    if (SHOP_PASSWORD && !isPublicRoute(method, url.pathname) && !hasSession(nodeReq)) {
+      if (method === 'POST' && url.pathname === '/shop/login') {
+        const form = new URLSearchParams((await readBody(nodeReq)).toString('utf8'))
+        if (sameSecret(form.get('password') || '', SHOP_PASSWORD)) {
+          log('LOGIN ok')
+          // Lax, so the browser still carries the cookie when Tpay sends the buyer back.
+          nodeRes.writeHead(303, {
+            Location: '/',
+            'Set-Cookie': `${SESSION_COOKIE}=${SESSION_SECRET}; Path=/; HttpOnly; SameSite=Lax`,
+          })
+          return nodeRes.end()
+        }
+        log('LOGIN refused')
+        nodeRes.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' })
+        return nodeRes.end(LOGIN_PAGE(true))
+      }
+      log('GATE', method, url.pathname)
+      // A form for a browser, a plain 401 for anything calling the API.
+      if (method === 'GET' && !url.pathname.startsWith(apiPrefix)) {
+        nodeRes.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' })
+        return nodeRes.end(LOGIN_PAGE(false))
+      }
+      return json(nodeRes, 401, { message: 'this development shop is password protected' })
+    }
+
     if (url.pathname.startsWith(apiPrefix)) return await forwardToApi(nodeReq, nodeRes, url)
 
     if (method === 'GET' && url.pathname === '/') return html(nodeRes, 'shop.html')
@@ -279,5 +360,10 @@ const server = http.createServer(async (nodeReq, nodeRes) => {
 server.listen(PORT, '127.0.0.1', () => {
   log(`Demo shop: http://127.0.0.1:${PORT}/  (API at ${apiPrefix})`)
   log('public address (return and notifications):', process.env.NEXT_PUBLIC_SERVER_URL || '(MISSING - initiate will refuse)')
+  const publicAddress = process.env.NEXT_PUBLIC_SERVER_URL || ''
+  const isLocal = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/.test(publicAddress)
+  if (SHOP_PASSWORD) log('access gate: ON (DEV_SHOP_PASSWORD set); open routes: POST /api/payments/tpay/notifications, GET /health')
+  else if (publicAddress && !isLocal) log('access gate: OFF and the address above is PUBLIC - anyone who learns it can mint sandbox transactions on your Tpay credentials; set DEV_SHOP_PASSWORD')
+  else log('access gate: OFF (no public address configured)')
   log('Endpoints:', (sanitized.endpoints ?? []).map((e: any) => `${e.method} ${e.path}`).join(', '))
 })

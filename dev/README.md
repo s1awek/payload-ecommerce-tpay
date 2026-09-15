@@ -22,6 +22,29 @@ node --import tsx server.mts
 payment result as a server to server request. A local address will never receive it. Any
 tunnel works; `cloudflared tunnel --url http://127.0.0.1:8099` is what these scripts assume.
 
+## Password gate (`shop.mts`)
+
+A tunnel makes this host public, and `POST /api/payments/tpay/initiate` mints sandbox
+transactions on **your** Tpay credentials. A random tunnel hostname is obscurity, not a
+control, so set a password before you open the tunnel:
+
+```bash
+export DEV_SHOP_PASSWORD='something-long'
+```
+
+The shop then answers 401 to everything until the password is typed on the page, and keeps
+the answer in a session cookie (`HttpOnly`, `SameSite=Lax`, new secret on every start, so a
+restart logs everyone out and nothing lands on disk). Two routes stay open on purpose:
+
+| Route | Why it is open |
+|---|---|
+| `POST /api/payments/tpay/notifications` | Tpay has no password; it authenticates with the JWS signature and the md5 checksum, both verified by the adapter |
+| `GET /health` | so a tunnel check does not need the password |
+
+Leaving `DEV_SHOP_PASSWORD` unset turns the gate off. That is fine on a local address; with a
+public one the startup line says the gate is off and what it means. `server.mts` has no gate
+and is meant for a local address only.
+
 ## The three scripts
 
 | Script | What it does |
